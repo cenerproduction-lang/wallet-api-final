@@ -1,0 +1,49 @@
+{
+  "formatVersion": 1,
+  "passTypeIdentifier": "pass.com.alibegovic.klubosmijeha",
+  "teamIdentifier": "6UA266Z942",
+  "organizationName": "Klub Osmijeha",
+  "description": "Loyalty kartica",
+  "backgroundColor": "rgb(255,255,255)",
+  "foregroundColor": "rgb(31,41,55)",
+  "labelColor": "rgb(31,41,55)",
+  "suppressStripShine": true,
+  "barcode": {
+    "message": "TO_BE_SET",
+    "format": "PKBarcodeFormatCode128",
+    "messageEncoding": "utf-8",
+    "altText": "TO_BE_SET"
+  },
+  "storeCard": {
+    "primaryFields": [],
+    "secondaryFields": [
+      {
+        "key": "leftSpacer",
+        "label": "",
+        "value": "",
+        "textAlignment": "PKTextAlignmentLeft",
+        "labelColor": "rgb(255,255,255)"
+      },
+      {
+        "key": "memberFullName",
+        "label": "ČLAN",
+        "value": "TO_BE_SET",
+        "textAlignment": "PKTextAlignmentCenter"
+      },
+      {
+        "key": "rightSpacer",
+        "label": "",
+        "value": "",
+        "textAlignment": "PKTextAlignmentRight",
+        "labelColor": "rgb(255,255,255)"
+      }
+    ],
+    "backFields": [
+      {
+        "key": "info",
+        "label": "Informacije",
+        "value": "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243"
+      }
+    ]
+  }
+}
