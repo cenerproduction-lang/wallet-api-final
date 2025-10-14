@@ -5,27 +5,25 @@ import dotenv from "dotenv";
 import { Pass } from "@walletpass/pass-js";
 dotenv.config();
 
-/* ==== ENV ==== */
+/* ==== ENV (Added trim() to prevent hidden whitespace issues) ==== */
 const {
-  PASS_TYPE_IDENTIFIER,
-  TEAM_IDENTIFIER,
-  ORG_NAME,
-  TEMPLATE_DIR,          // npr. /app/templates/klub-osmijeha
+  PASS_TYPE_IDENTIFIER: RAW_PTI,
+  TEAM_IDENTIFIER: RAW_TI,
+  ORG_NAME: RAW_ON,
+  TEMPLATE_DIR,
 
-  // PEM (file ili BASE64)
-  WWDR_PATH,
-  CERT_PEM_PATH,
-  KEY_PEM_PATH,
-  KEY_PASSPHRASE,
-  WWDR_PEM_BASE64,
-  CERT_PEM_BASE64,
-  KEY_PEM_BASE64,
+  // PEM
+  WWDR_PATH, CERT_PEM_PATH, KEY_PEM_PATH, KEY_PASSPHRASE,
+  WWDR_PEM_BASE64, CERT_PEM_BASE64, KEY_PEM_BASE64,
 
-  // P12 (file ili BASE64)
-  P12_PATH,
-  P12_PASSWORD,
-  P12_BASE64,
+  // P12
+  P12_PATH, P12_PASSWORD, P12_BASE64,
 } = process.env;
+
+const PASS_TYPE_IDENTIFIER = RAW_PTI ? RAW_PTI.trim() : null;
+const TEAM_IDENTIFIER      = RAW_TI ? RAW_TI.trim() : null;
+const ORG_NAME             = RAW_ON ? RAW_ON.trim() : "Klub Osmijeha";
+// END ENV
 
 /* ==== HELPERS ==== */
 function ensureDir(p) {
@@ -44,7 +42,6 @@ function getCertificateFiles() {
   const tmp = "/tmp/certs";
   ensureDir(tmp);
 
-  // WWDR
   let wwdrFile = WWDR_PATH ? abs(WWDR_PATH) : null;
   if (!wwdrFile || !fs.existsSync(wwdrFile)) {
     if (!WWDR_PEM_BASE64) throw new Error("WWDR missing: set WWDR_PATH or WWDR_PEM_BASE64");
@@ -52,9 +49,7 @@ function getCertificateFiles() {
     b64ToFile(wwdrFile, WWDR_PEM_BASE64);
   }
 
-  // PEM set?
-  const havePemFiles =
-    CERT_PEM_PATH && KEY_PEM_PATH && fs.existsSync(abs(CERT_PEM_PATH)) && fs.existsSync(abs(KEY_PEM_PATH));
+  const havePemFiles = CERT_PEM_PATH && KEY_PEM_PATH && fs.existsSync(abs(CERT_PEM_PATH)) && fs.existsSync(abs(KEY_PEM_PATH));
   const havePemB64 = CERT_PEM_BASE64 && KEY_PEM_BASE64;
 
   if (havePemFiles || havePemB64) {
@@ -67,7 +62,6 @@ function getCertificateFiles() {
     return { type: "PEM", wwdrFile, certFile, keyFile, keyPass: KEY_PASSPHRASE || "" };
   }
 
-  // P12 set?
   const haveP12File = P12_PATH && fs.existsSync(abs(P12_PATH));
   const haveP12B64  = !!P12_BASE64;
   if (haveP12File || haveP12B64) {
@@ -109,87 +103,100 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
           signerKeyPassphrase: certs.p12Pass,
         };
 
-  // 1) Model: novi pass.json + kopiraj slike
+  // 1) Priprema modela na disku: novi pass.json + kopiraj slike
   const templateDir = loadTemplateDir();
-
   const tmpModelDir = fs.mkdtempSync(path.join("/tmp", "model-"));
   ensureDir(tmpModelDir);
 
-  const requiredImgs = ["icon.png", "icon@2x.png", "logo.png"];
-  const optionalImgs = ["strip.png", "strip@2x.png"];
+  const images = [
+      { name: "icon.png", required: true },
+      { name: "icon@2x.png", required: true },
+      { name: "logo.png", required: true },
+      { name: "strip.png", required: false },
+      { name: "strip@2x.png", required: false },
+  ];
 
-  for (const img of requiredImgs) {
-    const src = path.join(templateDir, img);
-    if (!fs.existsSync(src)) throw new Error(`Missing required image: ${img} in ${templateDir}`);
-    fs.copyFileSync(src, path.join(tmpModelDir, img));
-  }
-  for (const img of optionalImgs) {
-    const src = path.join(templateDir, img);
-    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(tmpModelDir, img));
+  for (const img of images) {
+    const src = path.join(templateDir, img.name);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, path.join(tmpModelDir, img.name));
+    } else if (img.required) {
+      throw new Error(`Missing required image: ${img.name} in ${templateDir}`);
+    }
   }
   
-    const passJson = {
-      formatVersion: 1,
-      description: "Loyalty kartica",
-      organizationName: ORG_NAME || "Klub Osmijeha",
-      passTypeIdentifier: PASS_TYPE_IDENTIFIER,
-      teamIdentifier: TEAM_IDENTIFIER,
-      backgroundColor: "rgb(255,255,255)",
-      foregroundColor: "rgb(31,41,55)",
-      labelColor: "rgb(31,41,55)",
-      suppressStripShine: true,
-      barcode: {
-        message: String(memberId),
-        format: "PKBarcodeFormatCode128",
-        messageEncoding: "utf-8",
-        altText: String(memberId),
-      },
-      storeCard: {
-        primaryFields: [
-          { key: "member", label: "ČLAN", value: String(fullName).toUpperCase() }
-        ],
-        secondaryFields: [
-          { key: "leftSpacer", label: "", value: "", textAlignment: "PKTextAlignmentLeft",  labelColor: "rgb(255,255,255)" },
-          { key: "memberFullName", label: "", value: String(fullName), textAlignment: "PKTextAlignmentCenter" },
-          { key: "rightSpacer", label: "", value: "", textAlignment: "PKTextAlignmentRight", labelColor: "rgb(255,255,255)" },
-        ],
-      },
-      // <- OVDJE (top-level), ne u storeCard
-      backFields: [
-        { key: "info", label: "Informacije", value: "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243" },
+  // 2) Kreiraj pass.json objekt
+  const passJson = {
+    formatVersion: 1,
+    description: "Loyalty kartica",
+    organizationName: ORG_NAME,
+    passTypeIdentifier: PASS_TYPE_IDENTIFIER,
+    teamIdentifier: TEAM_IDENTIFIER,
+    backgroundColor: "rgb(255,255,255)",
+    foregroundColor: "rgb(31,41,55)",
+    labelColor: "rgb(31,41,55)",
+    suppressStripShine: true,
+    barcode: {
+      message: String(memberId),
+      format: "PKBarcodeFormatCode128",
+      messageEncoding: "utf-8",
+      altText: String(memberId),
+    },
+    storeCard: {
+      primaryFields: [
+        { key: "member", label: "ČLAN", value: String(fullName).toUpperCase() }
       ],
-    };
-    fs.writeFileSync(path.join(tmpModelDir, "pass.json"), JSON.stringify(passJson, null, 2));
-    console.log("[pass] v3 | modelDir:", tmpModelDir);
-    const check = JSON.parse(fs.readFileSync(path.join(tmpModelDir,"pass.json"), "utf8"));
-    console.log("[pass] description:", check.description);
-    if (!check.description) throw new Error("INTERNAL: description missing before Pass()");
+      secondaryFields: [
+        { key: "leftSpacer", label: "", value: "", textAlignment: "PKTextAlignmentLeft",  labelColor: "rgb(255,255,255)" },
+        { key: "memberFullName", label: "", value: String(fullName), textAlignment: "PKTextAlignmentCenter" },
+        { key: "rightSpacer", label: "", value: "", textAlignment: "PKTextAlignmentRight", labelColor: "rgb(255,255,255)" },
+      ],
+    },
+    backFields: [
+      { key: "info", label: "Informacije", value: "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243" },
+    ],
+  };
 
-    // 2) Upiši serialNumber u pass.json + kreiraj i snimi
-    const serial = serialNumber || `KOS-${memberId}`;
+  // 3) Upiši finalni JSON (sa serialNumberom) na disk
+  const serial = serialNumber || `KOS-${memberId}`;
+  const merged = { ...passJson, serialNumber: serial };
+  const finalPassPath = path.join(tmpModelDir, "pass.json");
 
-    // Upiši serialNumber DIREKTNO u pass.json (lib validira fajl na disku)
-    const merged = { ...passJson, serialNumber: serial };
-    fs.writeFileSync(path.join(tmpModelDir, "pass.json"), JSON.stringify(merged, null, 2));
+  fs.writeFileSync(finalPassPath, JSON.stringify(merged, null, 2));
 
-    // sanity log
-    const recheck = JSON.parse(fs.readFileSync(path.join(tmpModelDir, "pass.json"), "utf8"));
-    console.log("[pass] recheck.description:", recheck.description, "| serial:", recheck.serialNumber);
+  // --- CRITICAL DEBUG LOGGING ---
+  const recheck = JSON.parse(fs.readFileSync(finalPassPath, "utf8"));
+  console.log("[pass] recheck.description:", recheck.description, "| serial:", recheck.serialNumber);
 
-    // Kreiraj Pass iz modela na disku.
-    // **FIX**: The 'overrides' object is removed because all required properties
-    // (including description, teamIdentifier, and serialNumber) are already
-    // correctly written to the 'pass.json' file on disk. The redundant overrides
-    // were causing the description to be overwritten with an undefined value.
-    const pass = new Pass({
-      model: tmpModelDir,
+  try {
+      const stats = fs.statSync(finalPassPath);
+      console.log(`[pass] DEBUG: Final pass.json size: ${stats.size} bytes at ${finalPassPath}`);
+  } catch (error) {
+      // If this error shows up in your deployment logs, the problem is file permissions.
+      console.error(`[pass] DEBUG: ERROR accessing final pass.json at ${finalPassPath}:`, error.message);
+      throw new Error("File access error: Cannot read final pass.json. Check permissions.");
+  }
+  // --- END DEBUG LOGGING ---
+
+  // 4) Kreiraj Pass objekt (uses spread to ensure required fields are in constructor)
+  const pass = new Pass({
+      ...merged, // This satisfies the constructor's mandatory fields
+      model: tmpModelDir, // This loads the images and all assets
       certificates,
-      // overrides: {} <-- Removed the entire object
-    });
+  });
 
-    const outDir = abs("./output");
-    ensureDir(outDir);
-    const outPath = path.join(outDir, `${serial}.pkpass`);
-    fs.writeFileSync(outPath, await pass.asBuffer());
-    return outPath;
+  // 5) Sačuvaj pkpass fajl
+  const outDir = abs("./output");
+  ensureDir(outDir);
+  const outPath = path.join(outDir, `${serial}.pkpass`);
+  fs.writeFileSync(outPath, await pass.asBuffer());
+  
+  // 6) Očisti temp dir (optional, but good practice)
+  try {
+    fs.rmSync(tmpModelDir, { recursive: true, force: true });
+  } catch (e) {
+    console.error("[pass] Cleanup failed:", e.message);
+  }
+
+  return outPath;
 }
