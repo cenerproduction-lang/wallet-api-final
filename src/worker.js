@@ -36,9 +36,14 @@ async function processOnce() {
   if (!SHEET_CSV_URL) return console.warn("[worker] SHEET_CSV_URL not set");
   try {
     const csvText = await fetchCSV(SHEET_CSV_URL);
-    const parsed = Papa.parse(csvText, { header: true });
+    const parsed = Papa.parse(csvText, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: h => String(h || '').replace(/^\uFEFF/, '').trim()});
     const rows = parsed.data.map(normalizeRow);
-    const pending = rows.filter(r => r.status === "PENDING" && r.fullName && r.memberId);
+    const pending = rows.filter(r =>
+      String(r.status || '').toUpperCase() === 'PENDING' &&
+      r.fullName && r.memberId);
     if (!pending.length) return console.log(`[worker] Nema PENDING redova. (poll ${POLL_SEC}s)`);
 
     console.log(`[worker] Obrada ${pending.length} PENDING redova...`);
