@@ -165,10 +165,10 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
     console.log("[pass] description:", check.description);
     if (!check.description) throw new Error("INTERNAL: description missing before Pass()");
 
-    // 2) Upis u pass.json + kreiraj i snimi (bez overrides)
+    // 2) Upiši serialNumber u pass.json + kreiraj i snimi
     const serial = serialNumber || `KOS-${memberId}`;
 
-    // Upiši serialNumber i obavezna polja DIREKTNO u pass.json (lib validira fajl na disku)
+    // Upiši serialNumber DIREKTNO u pass.json (lib validira fajl na disku)
     const merged = { ...passJson, serialNumber: serial };
     fs.writeFileSync(path.join(tmpModelDir, "pass.json"), JSON.stringify(merged, null, 2));
 
@@ -176,17 +176,15 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
     const recheck = JSON.parse(fs.readFileSync(path.join(tmpModelDir, "pass.json"), "utf8"));
     console.log("[pass] recheck.description:", recheck.description, "| serial:", recheck.serialNumber);
 
-    // Kreiraj Pass iz modela na disku – DODAJ overrides
+    // Kreiraj Pass iz modela na disku.
+    // **FIX**: The 'overrides' object is removed because all required properties
+    // (including description, teamIdentifier, and serialNumber) are already
+    // correctly written to the 'pass.json' file on disk. The redundant overrides
+    // were causing the description to be overwritten with an undefined value.
     const pass = new Pass({
       model: tmpModelDir,
       certificates,
-      overrides: {
-        description: passJson.description,
-        organizationName: passJson.organizationName,
-        passTypeIdentifier: passJson.passTypeIdentifier,
-        teamIdentifier: passJson.teamIdentifier,
-        serialNumber: serial,
-      },
+      // overrides: {} <-- Removed the entire object
     });
 
     const outDir = abs("./output");
@@ -195,4 +193,3 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
     fs.writeFileSync(outPath, await pass.asBuffer());
     return outPath;
 }
-
