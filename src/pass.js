@@ -162,22 +162,27 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
   console.log("[pass] description:", check.description);
   if (!check.description) throw new Error("INTERNAL: description missing before Pass()");
 
-
-  // 2) Kreiraj i snimi
-    // 2) Kreiraj i snimi
-  const serial = serialNumber || `KOS-${memberId}`;
-  const pass = new Pass({
+    const serial = serialNumber || `KOS-${memberId}`;
+    const pass = new Pass({
       model: tmpModelDir,
       certificates,
-      overrides: {
-        // obavezni identifikatori + opis (pojas i tregere)
-        description: passJson.description,
-        organizationName: passJson.organizationName,
-        passTypeIdentifier: passJson.passTypeIdentifier,
-        teamIdentifier: passJson.teamIdentifier,
-        serialNumber: serial,
-      },
+
+      // ➜ stavi obavezna polja DIREKTNO na konstruktor:
+      serialNumber: serial,
+      description: passJson.description,
+      organizationName: passJson.organizationName,
+      passTypeIdentifier: passJson.passTypeIdentifier,
+      teamIdentifier: passJson.teamIdentifier,
+
+      // (safe) vizuelna podešavanja i barcode direktno:
+      backgroundColor: passJson.backgroundColor,
+      foregroundColor: passJson.foregroundColor,
+      labelColor: passJson.labelColor,
+      suppressStripShine: passJson.suppressStripShine,
+      barcode: passJson.barcode,
+      storeCard: passJson.storeCard,
     });
+
     const outDir = abs("./output");
     ensureDir(outDir);
     const outPath = path.join(outDir, `${serial}.pkpass`);
