@@ -156,22 +156,27 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
       ],
     },
   };
-  fs.writeFileSync(path.join(tmpModelDir, "pass.json"), JSON.stringify(passJson, null, 2));
+    fs.writeFileSync(path.join(tmpModelDir, "pass.json"), JSON.stringify(passJson, null, 2));
     console.log("[pass] v3 | modelDir:", tmpModelDir);
-  const check = JSON.parse(fs.readFileSync(path.join(tmpModelDir,"pass.json"), "utf8"));
-  console.log("[pass] description:", check.description);
-  if (!check.description) throw new Error("INTERNAL: description missing before Pass()");
+    const check = JSON.parse(fs.readFileSync(path.join(tmpModelDir,"pass.json"), "utf8"));
+    console.log("[pass] description:", check.description);
+    if (!check.description) throw new Error("INTERNAL: description missing before Pass()");
 
-    // 2) Kreiraj i snimi — koristi FULL overrides
+    // 2) Upis u pass.json + kreiraj i snimi (bez overrides)
     const serial = serialNumber || `KOS-${memberId}`;
 
-    // Napravi overrides kao kompletan pass.json + serialNumber
-    const overrides = { ...passJson, serialNumber: serial };
+    // Upiši serialNumber i obavezna polja DIREKTNO u pass.json (lib validira fajl na disku)
+    const merged = { ...passJson, serialNumber: serial };
+    fs.writeFileSync(path.join(tmpModelDir, "pass.json"), JSON.stringify(merged, null, 2));
 
+    // sanity log
+    const recheck = JSON.parse(fs.readFileSync(path.join(tmpModelDir, "pass.json"), "utf8"));
+    console.log("[pass] recheck.description:", recheck.description, "| serial:", recheck.serialNumber);
+
+    // Kreiraj Pass iz modela na disku – bez overrides
     const pass = new Pass({
       model: tmpModelDir,
       certificates,
-      overrides, // ključni dio: cijeli pass JSON ide ovdje
     });
 
     const outDir = abs("./output");
