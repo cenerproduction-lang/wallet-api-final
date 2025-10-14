@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
 import { Pass } from "@walletpass/pass-js";
+import { execSync } from "child_process"; // <-- NOVI IMPORT
 dotenv.config();
 
 /* ==== ENV (Added trim() to prevent hidden whitespace issues) ==== */
@@ -22,7 +23,7 @@ const {
 
 const PASS_TYPE_IDENTIFIER = RAW_PTI ? RAW_PTI.trim() : null;
 const TEAM_IDENTIFIER      = RAW_TI ? RAW_TI.trim() : null;
-const ORG_NAME             = RAW_ON ? RAW_ON.trim() : "Klub Osmijeha";
+const ORG_NAME             = RAW_ON && RAW_ON.trim().length > 0 ? RAW_ON.trim() : "Klub Osmijeha";
 // END ENV
 
 /* ==== HELPERS ==== */
@@ -36,6 +37,48 @@ function b64ToFile(filePath, b64) {
 function abs(p) {
   return path.isAbsolute(p) ? p : path.resolve(p);
 }
+
+// --- DEBUG HELPERS START ---
+
+function clean(val) {
+  return String(val || "").trim().replace(/^['"]|['"]$/g, "");
+}
+
+/** Čita Subject liniju iz certifikata pomoću OpenSSL */
+function readCertSubject(certs) {
+  try {
+    if (certs.type === "P12") {
+      const raw = execSync(
+        // Izvuci certifikat iz P12 i onda ispiši subject
+        `openssl pkcs12 -in "${certs.p12File}" -passin pass:${certs.p12Pass} -nodes -nokeys | openssl x509 -noout -subject`,
+        { stdio: ["ignore", "pipe", "pipe"] }
+      ).toString();
+      return raw;
+    } else {
+      // Pročitaj subject direktno iz PEM certifikata
+      const raw = execSync(
+        `openssl x509 -in "${certs.certFile}" -noout -subject`,
+        { stdio: ["ignore", "pipe", "pipe"] }
+      ).toString();
+      return raw;
+    }
+  } catch (e) {
+    console.warn("[cert] OpenSSL subject read failed:", e.message);
+    return "";
+  }
+}
+
+/** Parsira CN i OU iz Subject linije */
+function parseCNandOU(subjectLine) {
+  const CN = subjectLine.match(/CN\s*=\s*([^\/,]+)/)?.[1]?.trim() || "";
+  const OU = subjectLine.match(/OU\s*=\s*([A-Z0-9]{10})/)?.[1]?.trim() || "";
+  // Ako je CN format "Pass Type ID: pass.com.foo", izvuci samo dio poslije dvotačke
+  const passTypeFromCN = CN.includes(":") ? CN.split(":").slice(1).join(":").trim() : CN.trim();
+  return { passTypeFromCN, teamFromOU: OU };
+}
+
+// --- DEBUG HELPERS END ---
+
 
 /** Vrati putanje do certifikata – podržava PEM i P12, fajl ili BASE64 */
 function getCertificateFiles() {
@@ -102,6 +145,33 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
           signerCert: fs.readFileSync(certs.p12File),
           signerKeyPassphrase: certs.p12Pass,
         };
+        
+  // --- KRITIČNI DEBUG BLOK: PROVJERA ENV vs CERT ---
+  try {
+    const subj = readCertSubject(certs);
+    const { passTypeFromCN, teamFromOU } = parseCNandOU(subj);
+
+    const ENV_PASS = clean(PASS_TYPE_IDENTIFIER);
+    const ENV_TEAM = clean(TEAM_IDENTIFIER);
+
+    console.log("-----------------------------------------");
+    console.log("[DEBUG] ENV PASS_TYPE_IDENTIFIER:", JSON.stringify(ENV_PASS));
+    console.log("[DEBUG] ENV TEAM_IDENTIFIER:     ", JSON.stringify(ENV_TEAM));
+    console.log("[DEBUG] CERT CN (Pass Type ID):  ", JSON.stringify(passTypeFromCN));
+    console.log("[DEBUG] CERT OU (Team ID):       ", JSON.stringify(teamFromOU));
+    console.log("-----------------------------------------");
+
+    if (!passTypeFromCN || !teamFromOU) {
+      console.error("[DEBUG] Certifikat ne sadrži validan CN/OU.");
+    } else if (passTypeFromCN !== ENV_PASS) {
+      throw new Error(`[FATAL] PASS_TYPE_IDENTIFIER MISMATCH. ENV=${ENV_PASS} vs CERT=${passTypeFromCN}`);
+    } else if (teamFromOU !== ENV_TEAM) {
+      throw new Error(`[FATAL] TEAM_IDENTIFIER MISMATCH. ENV=${ENV_TEAM} vs CERT=${teamFromOU}`);
+    }
+  } catch (e) {
+      console.error("[DEBUG] Cert check failed, continuing:", e.message);
+  }
+  // --- KRAJ KRITIČNOG DEBUG BLOKA ---
 
   // 1) Priprema modela na disku: novi pass.json + kopiraj slike
   const templateDir = loadTemplateDir();
@@ -164,7 +234,7 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
 
   fs.writeFileSync(finalPassPath, JSON.stringify(merged, null, 2));
 
-  // --- CRITICAL DEBUG LOGGING ---
+  // --- KRITIČNO DEBUG LOGIRANJE FAJLA (ostaje za provjeru) ---
   const recheck = JSON.parse(fs.readFileSync(finalPassPath, "utf8"));
   console.log("[pass] recheck.description:", recheck.description, "| serial:", recheck.serialNumber);
 
@@ -172,16 +242,14 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
       const stats = fs.statSync(finalPassPath);
       console.log(`[pass] DEBUG: Final pass.json size: ${stats.size} bytes at ${finalPassPath}`);
   } catch (error) {
-      // If this error shows up in your deployment logs, the problem is file permissions.
       console.error(`[pass] DEBUG: ERROR accessing final pass.json at ${finalPassPath}:`, error.message);
-      throw new Error("File access error: Cannot read final pass.json. Check permissions.");
   }
-  // --- END DEBUG LOGGING ---
+  // --- KRAJ DEBUG LOGIRANJA ---
 
-  // 4) Kreiraj Pass objekt (uses spread to ensure required fields are in constructor)
+  // 4) Kreiraj Pass objekt (koristi spread za sigurnost)
   const pass = new Pass({
-      ...merged, // This satisfies the constructor's mandatory fields
-      model: tmpModelDir, // This loads the images and all assets
+      ...merged,
+      model: tmpModelDir,
       certificates,
   });
 
@@ -191,7 +259,7 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
   const outPath = path.join(outDir, `${serial}.pkpass`);
   fs.writeFileSync(outPath, await pass.asBuffer());
   
-  // 6) Očisti temp dir (optional, but good practice)
+  // 6) Očisti temp dir (optional)
   try {
     fs.rmSync(tmpModelDir, { recursive: true, force: true });
   } catch (e) {
