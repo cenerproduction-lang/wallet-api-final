@@ -157,14 +157,30 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
     },
   };
   fs.writeFileSync(path.join(tmpModelDir, "pass.json"), JSON.stringify(passJson, null, 2));
+    console.log("[pass] v3 | modelDir:", tmpModelDir);
+  const check = JSON.parse(fs.readFileSync(path.join(tmpModelDir,"pass.json"), "utf8"));
+  console.log("[pass] description:", check.description);
+  if (!check.description) throw new Error("INTERNAL: description missing before Pass()");
+
 
   // 2) Kreiraj i snimi
+    // 2) Kreiraj i snimi
   const serial = serialNumber || `KOS-${memberId}`;
-  const pass = new Pass({ model: tmpModelDir, certificates, overrides: { serialNumber: serial } });
-
-  const outDir = abs("./output");
-  ensureDir(outDir);
-  const outPath = path.join(outDir, `${serial}.pkpass`);
-  fs.writeFileSync(outPath, await pass.asBuffer());
-  return outPath;
+  const pass = new Pass({
+      model: tmpModelDir,
+      certificates,
+      overrides: {
+        // obavezni identifikatori + opis (pojas i tregere)
+        description: passJson.description,
+        organizationName: passJson.organizationName,
+        passTypeIdentifier: passJson.passTypeIdentifier,
+        teamIdentifier: passJson.teamIdentifier,
+        serialNumber: serial,
+      },
+    });
+    const outDir = abs("./output");
+    ensureDir(outDir);
+    const outPath = path.join(outDir, `${serial}.pkpass`);
+    fs.writeFileSync(outPath, await pass.asBuffer());
+    return outPath;
 }
