@@ -10,20 +10,27 @@ app.use(express.json());
 // health check
 app.get("/", (_req, res) => res.send("Wallet API OK"));
 
-// POST /passes { fullName, memberId, serialNumber? }
+
 app.post("/passes", async (req, res) => {
   try {
     const { fullName, memberId, serialNumber } = req.body || {};
     if (!fullName || !memberId) {
-      return res.status(400).json({ error: "fullName and memberId are required" });
+      return res.status(400).json({ ok: false, error: "fullName and memberId are required" });
     }
-    const sn = serialNumber || `KOS-${memberId}`;
-    await createStoreCardPass({ fullName, memberId, serialNumber: sn });
-    const url = `/download/${encodeURIComponent(sn)}.pkpass`;
-    res.json({ ok: true, serialNumber: sn, url });
+    const outPath = await createStoreCardPass({ fullName, memberId, serialNumber });
+    const fileName = path.basename(outPath);
+    return res.status(200).json({
+      ok: true,
+      url: `/download/${encodeURIComponent(fileName)}`,
+      serialNumber: fileName.replace(/\.pkpass$/i, "")
+    });
   } catch (e) {
-    console.error("PASS ERROR:", e);
-    res.status(500).json({ error: "Pass generation failed", details: String(e.message || e) });
+    console.error("POST /passes error:", e);
+    return res.status(500).json({
+      ok: false,
+      error: String(e?.message || e),
+      stack: String(e?.stack || "")
+    });
   }
 });
 

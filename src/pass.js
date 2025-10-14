@@ -57,10 +57,8 @@ function getCertificateFiles() {
 export async function createStoreCardPass({ fullName, memberId, serialNumber }) {
   if (!fullName || !memberId) throw new Error("fullName and memberId are required");
 
-  const modelDir = path.resolve(TEMPLATE_DIR || "./templates/klub-osmijeha");
+  // 1) Certifikati (PEM ili P12; PATH ili BASE64)
   const certs = getCertificateFiles();
-
-  // @walletpass/pass-js očekuje wwdr + signer (PEM ili P12)
   const certificates =
     certs.type === "PEM"
       ? {
@@ -76,21 +74,55 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
 
   const serial = serialNumber || `KOS-${memberId}`;
 
-  // ✅ koristi konstruktor (tvoja verzija nema Pass.from)
+  // 2) Runtime guard za model: kopiraj template i osiguraj pass.json
+  const baseModelDir = path.resolve(TEMPLATE_DIR || "./templates/klub-osmijeha");
+
+  const tmpModelDir = fs.mkdtempSync(path.join("/tmp", "model-"));
+  (function copyDir(src, dest) {
+    fs.mkdirSync(dest, { recursive: true });
+    for (const e of fs.readdirSync(src)) {
+      const s = path.join(src, e), d = path.join(dest, e);
+      const st = fs.statSync(s);
+      if (st.isDirectory()) copyDir(s, d);
+      else fs.copyFileSync(s, d);
+    }
+  })(baseModelDir, tmpModelDir);
+
+  const passJsonPath = path.join(tmpModelDir, "pass.json");
+  let passJson = {};
+  if (fs.existsSync(passJsonPath)) {
+    try { passJson = JSON.parse(fs.readFileSync(passJsonPath, "utf8")); }
+    catch { passJson = {}; }
+  }
+  passJson.formatVersion        = passJson.formatVersion ?? 1;
+  passJson.description          = passJson.description ?? "Loyalty kartica";
+  passJson.organizationName     = passJson.organizationName ?? (ORG_NAME || "Klub Osmijeha");
+  passJson.passTypeIdentifier   = passJson.passTypeIdentifier ?? PASS_TYPE_IDENTIFIER;
+  passJson.teamIdentifier       = passJson.teamIdentifier ?? TEAM_IDENTIFIER;
+  passJson.backgroundColor      = passJson.backgroundColor ?? "rgb(255,255,255)";
+  passJson.foregroundColor      = passJson.foregroundColor ?? "rgb(31,41,55)";
+  passJson.labelColor           = passJson.labelColor ?? "rgb(31,41,55)";
+  passJson.suppressStripShine   = passJson.suppressStripShine ?? true;
+  passJson.storeCard            = passJson.storeCard || { primaryFields: [], secondaryFields: [], backFields: [] };
+  fs.writeFileSync(passJsonPath, JSON.stringify(passJson, null, 2));
+
+  const modelDir = tmpModelDir; // koristimo “očvrsnuti” model
+
+  // 3) Napravi pass
   const pass = new Pass({
     model: modelDir,
     certificates,
     overrides: {
-      description: "Loyalty kartica",
-      organizationName: ORG_NAME || "Klub Osmijeha",
-      passTypeIdentifier: PASS_TYPE_IDENTIFIER,
-      teamIdentifier: TEAM_IDENTIFIER,
+      description: passJson.description,
+      organizationName: passJson.organizationName,
+      passTypeIdentifier: passJson.passTypeIdentifier,
+      teamIdentifier: passJson.teamIdentifier,
       serialNumber: serial,
 
-      backgroundColor: "rgb(255,255,255)",
-      foregroundColor: "rgb(31,41,55)",
-      labelColor: "rgb(31,41,55)",
-      suppressStripShine: true,
+      backgroundColor: passJson.backgroundColor,
+      foregroundColor: passJson.foregroundColor,
+      labelColor: passJson.labelColor,
+      suppressStripShine: passJson.suppressStripShine,
 
       barcode: {
         message: String(memberId),
@@ -100,20 +132,20 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
       },
 
       storeCard: {
-        primaryFields: [],
+        primaryFields: passJson.storeCard.primaryFields || [],
         secondaryFields: [
-          { key: "leftSpacer", label: "", value: "", textAlignment: "PKTextAlignmentLeft", labelColor: "rgb(255,255,255)" },
+          { key: "leftSpacer",  label: "", value: "", textAlignment: "PKTextAlignmentLeft",  labelColor: "rgb(255,255,255)" },
           { key: "memberFullName", label: "ČLAN", value: String(fullName), textAlignment: "PKTextAlignmentCenter" },
           { key: "rightSpacer", label: "", value: "", textAlignment: "PKTextAlignmentRight", labelColor: "rgb(255,255,255)" },
         ],
-        backFields: [
-          { key: "info", label: "Informacije", value: "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243" },
+        backFields: passJson.storeCard.backFields || [
+          { key: "info", label: "Informacije", value: "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243" }
         ],
       },
     },
   });
 
-  // Snimi .pkpass
+  // 4) Snimi .pkpass
   const outDir = "./output";
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir);
   const outPath = path.join(outDir, `${serial}.pkpass`);
