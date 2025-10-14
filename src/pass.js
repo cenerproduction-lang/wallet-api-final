@@ -127,35 +127,38 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
     const src = path.join(templateDir, img);
     if (fs.existsSync(src)) fs.copyFileSync(src, path.join(tmpModelDir, img));
   }
-
-  const passJson = {
-    formatVersion: 1,
-    description: "Loyalty kartica",
-    organizationName: ORG_NAME || "Klub Osmijeha",
-    passTypeIdentifier: PASS_TYPE_IDENTIFIER,
-    teamIdentifier: TEAM_IDENTIFIER,
-    backgroundColor: "rgb(255,255,255)",
-    foregroundColor: "rgb(31,41,55)",
-    labelColor: "rgb(31,41,55)",
-    suppressStripShine: true,
-    barcode: {
-      message: String(memberId),
-      format: "PKBarcodeFormatCode128",
-      messageEncoding: "utf-8",
-      altText: String(memberId),
-    },
-    storeCard: {
-      primaryFields: [{ key: "member", label: "ČLAN", value: String(fullName).toUpperCase() }],
-      secondaryFields: [
-        { key: "leftSpacer", label: "", value: "", textAlignment: "PKTextAlignmentLeft",  labelColor: "rgb(255,255,255)" },
-        { key: "memberFullName", label: "", value: String(fullName), textAlignment: "PKTextAlignmentCenter" },
-        { key: "rightSpacer", label: "", value: "", textAlignment: "PKTextAlignmentRight", labelColor: "rgb(255,255,255)" },
-      ],
+  
+    const passJson = {
+      formatVersion: 1,
+      description: "Loyalty kartica",
+      organizationName: ORG_NAME || "Klub Osmijeha",
+      passTypeIdentifier: PASS_TYPE_IDENTIFIER,
+      teamIdentifier: TEAM_IDENTIFIER,
+      backgroundColor: "rgb(255,255,255)",
+      foregroundColor: "rgb(31,41,55)",
+      labelColor: "rgb(31,41,55)",
+      suppressStripShine: true,
+      barcode: {
+        message: String(memberId),
+        format: "PKBarcodeFormatCode128",
+        messageEncoding: "utf-8",
+        altText: String(memberId),
+      },
+      storeCard: {
+        primaryFields: [
+          { key: "member", label: "ČLAN", value: String(fullName).toUpperCase() }
+        ],
+        secondaryFields: [
+          { key: "leftSpacer", label: "", value: "", textAlignment: "PKTextAlignmentLeft",  labelColor: "rgb(255,255,255)" },
+          { key: "memberFullName", label: "", value: String(fullName), textAlignment: "PKTextAlignmentCenter" },
+          { key: "rightSpacer", label: "", value: "", textAlignment: "PKTextAlignmentRight", labelColor: "rgb(255,255,255)" },
+        ],
+      },
+      // <- OVDJE (top-level), ne u storeCard
       backFields: [
         { key: "info", label: "Informacije", value: "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243" },
       ],
-    },
-  };
+    };
     fs.writeFileSync(path.join(tmpModelDir, "pass.json"), JSON.stringify(passJson, null, 2));
     console.log("[pass] v3 | modelDir:", tmpModelDir);
     const check = JSON.parse(fs.readFileSync(path.join(tmpModelDir,"pass.json"), "utf8"));
@@ -173,10 +176,17 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
     const recheck = JSON.parse(fs.readFileSync(path.join(tmpModelDir, "pass.json"), "utf8"));
     console.log("[pass] recheck.description:", recheck.description, "| serial:", recheck.serialNumber);
 
-    // Kreiraj Pass iz modela na disku – bez overrides
+    // Kreiraj Pass iz modela na disku – DODAJ overrides
     const pass = new Pass({
       model: tmpModelDir,
       certificates,
+      overrides: {
+        description: passJson.description,
+        organizationName: passJson.organizationName,
+        passTypeIdentifier: passJson.passTypeIdentifier,
+        teamIdentifier: passJson.teamIdentifier,
+        serialNumber: serial,
+      },
     });
 
     const outDir = abs("./output");
@@ -185,3 +195,4 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
     fs.writeFileSync(outPath, await pass.asBuffer());
     return outPath;
 }
+
