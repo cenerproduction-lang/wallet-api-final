@@ -162,25 +162,16 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
   console.log("[pass] description:", check.description);
   if (!check.description) throw new Error("INTERNAL: description missing before Pass()");
 
+    // 2) Kreiraj i snimi — koristi FULL overrides
     const serial = serialNumber || `KOS-${memberId}`;
+
+    // Napravi overrides kao kompletan pass.json + serialNumber
+    const overrides = { ...passJson, serialNumber: serial };
+
     const pass = new Pass({
       model: tmpModelDir,
       certificates,
-
-      // ➜ stavi obavezna polja DIREKTNO na konstruktor:
-      serialNumber: serial,
-      description: passJson.description,
-      organizationName: passJson.organizationName,
-      passTypeIdentifier: passJson.passTypeIdentifier,
-      teamIdentifier: passJson.teamIdentifier,
-
-      // (safe) vizuelna podešavanja i barcode direktno:
-      backgroundColor: passJson.backgroundColor,
-      foregroundColor: passJson.foregroundColor,
-      labelColor: passJson.labelColor,
-      suppressStripShine: passJson.suppressStripShine,
-      barcode: passJson.barcode,
-      storeCard: passJson.storeCard,
+      overrides, // ključni dio: cijeli pass JSON ide ovdje
     });
 
     const outDir = abs("./output");
