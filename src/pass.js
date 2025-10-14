@@ -24,13 +24,15 @@ function getCertificateFiles() {
   const dir = "/tmp/certs";
   fs.mkdirSync(dir, { recursive: true });
 
-  // WWDR
-  let wwdrFile = WWDR_PATH ? path.resolve(WWDR_PATH) : path.join(dir, "wwdr.pem");
-  if (!WWDR_PATH && WWDR_PEM_BASE64) {
+  // WWDR: koristi WWDR_PATH ako postoji i fajl je tu; inače iz BASE64
+  let wwdrFile = WWDR_PATH ? path.resolve(WWDR_PATH) : null;
+  if (!wwdrFile || !fs.existsSync(wwdrFile)) {
+    if (!WWDR_PEM_BASE64) throw new Error("WWDR missing: set WWDR_PATH to existing file or provide WWDR_PEM_BASE64");
+    wwdrFile = path.join(dir, "wwdr.pem");
     fs.writeFileSync(wwdrFile, Buffer.from(WWDR_PEM_BASE64, "base64"));
   }
 
-  // (A) PEM par
+  // (A) PEM par ako oba postoje
   if (CERT_PEM_PATH && KEY_PEM_PATH && fs.existsSync(CERT_PEM_PATH) && fs.existsSync(KEY_PEM_PATH)) {
     return {
       type: "PEM",
@@ -41,22 +43,15 @@ function getCertificateFiles() {
     };
   }
 
-  // (B) P12
-  let p12File = P12_PATH ? path.resolve(P12_PATH) : path.join(dir, "cert.p12");
-  if (!P12_PATH && P12_BASE64) {
+  // (B) P12: koristi P12_PATH ako postoji; inače iz BASE64
+  let p12File = (P12_PATH && fs.existsSync(P12_PATH)) ? path.resolve(P12_PATH) : null;
+  if (!p12File) {
+    if (!P12_BASE64) throw new Error("P12 missing: set P12_PATH to existing file or provide P12_BASE64");
+    p12File = path.join(dir, "cert.p12");
     fs.writeFileSync(p12File, Buffer.from(P12_BASE64, "base64"));
   }
 
-  if (fs.existsSync(p12File)) {
-    return {
-      type: "P12",
-      wwdrFile,
-      p12File,
-      p12Pass: P12_PASSWORD || "",
-    };
-  }
-
-  throw new Error("Missing signer certificates: provide CERT_PEM_PATH/KEY_PEM_PATH or P12_(PATH|BASE64).");
+  return { type: "P12", wwdrFile, p12File, p12Pass: P12_PASSWORD || "" };
 }
 
 export async function createStoreCardPass({ fullName, memberId, serialNumber }) {
@@ -81,11 +76,11 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
 
   const serial = serialNumber || `KOS-${memberId}`;
 
-  const pass = await Pass.from({
+  // ✅ koristi konstruktor (tvoja verzija nema Pass.from)
+  const pass = new Pass({
     model: modelDir,
     certificates,
     overrides: {
-      // OBAVEZNA polja za validaciju
       description: "Loyalty kartica",
       organizationName: ORG_NAME || "Klub Osmijeha",
       passTypeIdentifier: PASS_TYPE_IDENTIFIER,
