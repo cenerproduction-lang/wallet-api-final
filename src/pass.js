@@ -219,15 +219,14 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
 
     // layout: veliki natpis ČLAN + ime na prvoj strani
     passJson.storeCard = {
-      primaryFields: [
-        {
-          key: "member",
-          label: "ČLAN",
-          value: String(fullName),               // bez .toUpperCase()
-          textAlignment: "PKTextAlignmentCenter" // centrira kao na slici
-        }
-      ]
+      primaryFields: [], // nema primarnih, sve ide u secondary
+      secondaryFields: [
+        { key: "leftSpacer",  label: "", value: "", textAlignment: "PKTextAlignmentLeft",  labelColor: "rgb(255,255,255)" },
+        { key: "member",      label: "ČLAN", value: String(fullName), textAlignment: "PKTextAlignmentCenter" },
+        { key: "rightSpacer", label: "", value: "", textAlignment: "PKTextAlignmentRight", labelColor: "rgb(255,255,255)" },
+      ],
     };
+
 
     // Back strana (top-level, izvan storeCard)
     passJson.backFields = [
