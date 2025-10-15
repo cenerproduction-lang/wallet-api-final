@@ -201,8 +201,6 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
     passJson.description        = passJson.description || "Loyalty kartica";
     passJson.formatVersion      = passJson.formatVersion ?? 1;
 
-    // ime ispod logotipa (uvijek se vidi)
-    passJson.logoText = String(fullName);
 
     // barcodes (plural + single radi kompatibilnosti)
     passJson.barcodes = [{
