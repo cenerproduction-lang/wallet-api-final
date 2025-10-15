@@ -187,22 +187,30 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
     }
   }
 
-  // 2) Učitaj i popuni pass.json
-  const finalPassPath = path.join(tmpModelDir, "pass.json");
-  const passJson = JSON.parse(fs.readFileSync(finalPassPath, "utf8"));
+    // 2) Učitaj i popuni pass.json
+    const finalPassPath = path.join(tmpModelDir, "pass.json");
+    const passJson = JSON.parse(fs.readFileSync(finalPassPath, "utf8"));
 
-  passJson.organizationName   = ORG_NAME || "Klub Osmijeha";
-  passJson.passTypeIdentifier = PASS_TYPE_IDENTIFIER;
-  passJson.teamIdentifier     = TEAM_IDENTIFIER;
-    // --- BARCODE(S): plural + singl radi kompatibilnosti ---
+    // prikazuj samo storeCard – ukloni ostale stilove ako su ostali u templateu
+    for (const k of ["coupon","eventTicket","boardingPass","generic"]) delete passJson[k];
+
+    // osnovna meta
+    passJson.organizationName   = ORG_NAME || "Klub Osmijeha";
+    passJson.passTypeIdentifier = PASS_TYPE_IDENTIFIER;
+    passJson.teamIdentifier     = TEAM_IDENTIFIER;
+    passJson.description        = passJson.description || "Loyalty kartica";
+    passJson.formatVersion      = passJson.formatVersion ?? 1;
+
+    // ime ispod logotipa (uvijek se vidi)
+    passJson.logoText = String(fullName);
+
+    // barcodes (plural + single radi kompatibilnosti)
     passJson.barcodes = [{
       message: String(memberId),
       format: "PKBarcodeFormatCode128",
       messageEncoding: "utf-8",
       altText: String(memberId),
     }];
-
-    // (zadrži i singl barcode)
     passJson.barcode = {
       message: String(memberId),
       format: "PKBarcodeFormatCode128",
@@ -210,13 +218,11 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
       altText: String(memberId),
     };
 
-    // --- LAYOUT: samo primary field da bi "ČLAN" i barcode bili na prvoj strani ---
+    // layout: veliki natpis ČLAN + ime na prvoj strani
     passJson.storeCard = {
       primaryFields: [
         { key: "member", label: "ČLAN", value: String(fullName).toUpperCase() }
       ]
-      // Ako želiš dodatni tekst, stavi ga u auxiliaryFields (opcija):
-      // ,auxiliaryFields: [{ key: "memberFullName", label: "", value: String(fullName) }]
     };
 
     // Back strana (top-level, izvan storeCard)
