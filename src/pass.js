@@ -2,7 +2,7 @@
 import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
-import { Pass } from "@walletpass/pass-js";
+import { Template } from "@walletpass/pass-js";
 import { execSync } from "child_process"; // <-- NOVI IMPORT
 dotenv.config();
 
@@ -218,63 +218,70 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
   const recheck = JSON.parse(fs.readFileSync(finalPassPath, "utf8"));
   console.log("[pass] recheck.description:", recheck.description, "| serial:", recheck.serialNumber);
 
-  // 4) Kreiraj Pass – minimalni overrides
-  const overrides = {
-    description: recheck.description,
-    organizationName: recheck.organizationName,
-    passTypeIdentifier: PASS_TYPE_IDENTIFIER,
-    teamIdentifier: TEAM_IDENTIFIER,
-    serialNumber: serial,
-  };
+    // 4) Učitaj Template i postavi cert/ključ NA TEMPLATE
+    const template = await Template.load(tmpModelDir);
 
-  const pass = new Pass({
-    model: tmpModelDir,
-    certificates,
-    overrides,
-  });
+    if (certs.type === "PEM") {
+      const certPem = fs.readFileSync(certs.certFile, "utf8");
+      const keyPem  = fs.readFileSync(certs.keyFile, "utf8");
+      await template.setCertificate(certPem);
+      await template.setPrivateKey(keyPem, certs.keyPass || "");
+    } else {
+      // P12 -> PEM u hodu (ako koristiš samo P12)
+      const pemCert = path.join("/tmp/certs", "p12-cert.pem");
+      const pemKey  = path.join("/tmp/certs", "p12-key.pem");
+      try {
+        execSync(`openssl pkcs12 -in "${certs.p12File}" -passin pass:${certs.p12Pass} -clcerts -nokeys -out "${pemCert}"`);
+        execSync(`openssl pkcs12 -in "${certs.p12File}" -passin pass:${certs.p12Pass} -nocerts -nodes -out "${pemKey}"`);
+      } catch (e) {
+        throw new Error("P12→PEM export failed: " + e.message);
+      }
+      await template.setCertificate(fs.readFileSync(pemCert, "utf8"));
+      await template.setPrivateKey(fs.readFileSync(pemKey, "utf8"));
+    }
 
-  // Failsafe: upiši direktno na instancu
-  pass.description        = pass.description        ?? recheck.description;
-  pass.organizationName   = pass.organizationName   ?? recheck.organizationName;
-  pass.passTypeIdentifier = pass.passTypeIdentifier ?? PASS_TYPE_IDENTIFIER;
-  pass.teamIdentifier     = pass.teamIdentifier     ?? TEAM_IDENTIFIER;
-  pass.serialNumber       = pass.serialNumber       ?? serial;
-
-  // 5) Eksplicitno prikači slike (ključ + density)
-  const imageMap = [
-    { key: "icon",  files: ["icon.png", "icon@2x.png", "icon@3x.png"] },
-    { key: "logo",  files: ["logo.png", "logo@2x.png", "logo@3x.png"] },
-    { key: "strip", files: ["strip.png", "strip@2x.png", "strip@3x.png"] },
-  ];
-  for (const { key, files } of imageMap) {
-    for (const f of files) {
-      const p = path.join(tmpModelDir, f);
-      if (fs.existsSync(p)) {
-        const buf = fs.readFileSync(p);
-        const density = f.includes("@3x") ? "3x" : f.includes("@2x") ? "2x" : undefined;
-        await pass.images.add(key, buf, density);
-        console.log(`[pass] added image: ${key} ${density || "1x"}`);
+    // (Opcionalno) ako želiš eksplicitno dodati slike, iako Template.load već čita PNG-ove iz foldera:
+    /*
+    const imageMap = [
+      { key: "icon",  files: ["icon.png", "icon@2x.png", "icon@3x.png"] },
+      { key: "logo",  files: ["logo.png", "logo@2x.png", "logo@3x.png"] },
+      { key: "strip", files: ["strip.png", "strip@2x.png", "strip@3x.png"] },
+    ];
+    for (const { key, files } of imageMap) {
+      for (const f of files) {
+        const p = path.join(tmpModelDir, f);
+        if (fs.existsSync(p)) {
+          const buf = fs.readFileSync(p);
+          const density = f.includes("@3x") ? "3x" : f.includes("@2x") ? "2x" : undefined;
+          await template.images.add(key, buf, density);
+        }
       }
     }
-  }
+    */
 
-  console.log("[pass] instance:", {
-    desc: pass.description,
-    org: pass.organizationName,
-    sn: pass.serialNumber,
-    pti: pass.passTypeIdentifier,
-    team: pass.teamIdentifier,
-  });
+    // 5) Napravi Pass iz template-a (finalna polja imamo u `recheck`)
+    const pass = template.createPass({
+      ...recheck, // uključuje: serialNumber, description, organizationName, passTypeIdentifier, teamIdentifier, barcode, storeCard, backFields, boje...
+    });
 
-  // 6) Snimi pkpass
-  const outDir = abs("./output");
-  ensureDir(outDir);
-  const outPath = path.join(outDir, `${serial}.pkpass`);
-  fs.writeFileSync(outPath, await pass.asBuffer());
+    // Debug
+    console.log("[pass] instance:", {
+      desc: pass.description,
+      org: pass.organizationName,
+      sn:  pass.serialNumber,
+      pti: pass.passTypeIdentifier,
+      team: pass.teamIdentifier,
+    });
 
-  // 7) Čišćenje
-  try { fs.rmSync(tmpModelDir, { recursive: true, force: true }); }
-  catch (e) { console.error("[pass] Cleanup failed:", e.message); }
+    // 6) Snimi .pkpass
+    const outDir = abs("./output");
+    ensureDir(outDir);
+    const outPath = path.join(outDir, `${serial}.pkpass`);
+    fs.writeFileSync(outPath, await pass.asBuffer());
 
-  return outPath;
+    // 7) Čišćenje
+    try { fs.rmSync(tmpModelDir, { recursive: true, force: true }); }
+    catch (e) { console.error("[pass] Cleanup failed:", e.message); }
+
+    return outPath;
 }
