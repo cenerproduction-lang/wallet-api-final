@@ -196,75 +196,97 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
   }
   
   // 2) Kreiraj pass.json objekt
-  const passJson = {
-    formatVersion: 1,
-    description: "Loyalty kartica",
-    organizationName: ORG_NAME,
-    passTypeIdentifier: PASS_TYPE_IDENTIFIER,
-    teamIdentifier: TEAM_IDENTIFIER,
-    backgroundColor: "rgb(255,255,255)",
-    foregroundColor: "rgb(31,41,55)",
-    labelColor: "rgb(31,41,55)",
-    suppressStripShine: true,
-    barcode: {
-      message: String(memberId),
-      format: "PKBarcodeFormatCode128",
-      messageEncoding: "utf-8",
-      altText: String(memberId),
-    },
-    storeCard: {
-      primaryFields: [
-        { key: "member", label: "ČLAN", value: String(fullName).toUpperCase() }
+    const passJson = {
+      formatVersion: 1,
+      description: "Loyalty kartica",
+      organizationName: ORG_NAME, // Koristi ORG_NAME koji je već obrađen u ENV sekciji
+      passTypeIdentifier: PASS_TYPE_IDENTIFIER,
+      teamIdentifier: TEAM_IDENTIFIER,
+      backgroundColor: "rgb(255,255,255)",
+      foregroundColor: "rgb(31,41,55)",
+      labelColor: "rgb(31,41,55)",
+      suppressStripShine: true,
+      barcode: {
+        message: String(memberId),
+        format: "PKBarcodeFormatCode128",
+        messageEncoding: "utf-8",
+        altText: String(memberId),
+      },
+      storeCard: {
+        primaryFields: [
+          { key: "member", label: "ČLAN", value: String(fullName).toUpperCase() }
+        ],
+        secondaryFields: [
+          { key: "leftSpacer", label: "", value: "", textAlignment: "PKTextAlignmentLeft",  labelColor: "rgb(255,255,255)" },
+          { key: "memberFullName", label: "", value: String(fullName), textAlignment: "PKTextAlignmentCenter" },
+          { key: "rightSpacer", label: "", value: "", textAlignment: "PKTextAlignmentRight", labelColor: "rgb(255,255,255)" },
+        ],
+      },
+      backFields: [
+        { key: "info", label: "Informacije", value: "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243" },
       ],
-      secondaryFields: [
-        { key: "leftSpacer", label: "", value: "", textAlignment: "PKTextAlignmentLeft",  labelColor: "rgb(255,255,255)" },
-        { key: "memberFullName", label: "", value: String(fullName), textAlignment: "PKTextAlignmentCenter" },
-        { key: "rightSpacer", label: "", value: "", textAlignment: "PKTextAlignmentRight", labelColor: "rgb(255,255,255)" },
-      ],
-    },
-    backFields: [
-      { key: "info", label: "Informacije", value: "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243" },
-    ],
-  };
+    };
 
-  // 3) Upiši finalni JSON (sa serialNumberom) na disk
-  const serial = serialNumber || `KOS-${memberId}`;
-  const merged = { ...passJson, serialNumber: serial };
-  const finalPassPath = path.join(tmpModelDir, "pass.json");
+    // 3) Upiši finalni JSON (sa serialNumberom) na disk
+    const serial = serialNumber || `KOS-${memberId}`;
+    const finalPassPath = path.join(tmpModelDir, "pass.json");
+    // Upiši passJson + serialNumber na disk
+    fs.writeFileSync(finalPassPath, JSON.stringify({ ...passJson, serialNumber: serial }, null, 2));
 
-  fs.writeFileSync(finalPassPath, JSON.stringify(merged, null, 2));
+    // --- KRITIČNO DEBUG LOGIRANJE FAJLA (ostaje za provjeru) ---
+    const recheck = JSON.parse(fs.readFileSync(finalPassPath, "utf8"));
+    console.log("[pass] recheck.description:", recheck.description, "| serial:", recheck.serialNumber);
+    try {
+        const stats = fs.statSync(finalPassPath);
+        console.log(`[pass] DEBUG: Final pass.json size: ${stats.size} bytes at ${finalPassPath}`);
+    } catch (error) {
+        console.error(`[pass] DEBUG: ERROR accessing final pass.json at ${finalPassPath}:`, error.message);
+    }
+    // --- KRAJ DEBUG LOGIRANJA ---
 
-  // --- KRITIČNO DEBUG LOGIRANJE FAJLA (ostaje za provjeru) ---
-  const recheck = JSON.parse(fs.readFileSync(finalPassPath, "utf8"));
-  console.log("[pass] recheck.description:", recheck.description, "| serial:", recheck.serialNumber);
-
-  try {
-      const stats = fs.statSync(finalPassPath);
-      console.log(`[pass] DEBUG: Final pass.json size: ${stats.size} bytes at ${finalPassPath}`);
-  } catch (error) {
-      console.error(`[pass] DEBUG: ERROR accessing final pass.json at ${finalPassPath}:`, error.message);
-  }
-  // --- KRAJ DEBUG LOGIRANJA ---
-
-  // 4) Kreiraj Pass objekt (koristi spread za sigurnost)
-  const pass = new Pass({
-      ...merged,
+    // 4) Kreiraj Pass objekt – minimalni overrides (samo obavezna polja)
+    const overrides = {
+      description: passJson.description,
+      organizationName: passJson.organizationName,
+      passTypeIdentifier: PASS_TYPE_IDENTIFIER,
+      teamIdentifier: TEAM_IDENTIFIER,
+      serialNumber: serial,
+    };
+    
+    const pass = new Pass({
       model: tmpModelDir,
       certificates,
-  });
+      overrides,
+    });
 
-  // 5) Sačuvaj pkpass fajl
-  const outDir = abs("./output");
-  ensureDir(outDir);
-  const outPath = path.join(outDir, `${serial}.pkpass`);
-  fs.writeFileSync(outPath, await pass.asBuffer());
-  
-  // 6) Očisti temp dir (optional)
-  try {
-    fs.rmSync(tmpModelDir, { recursive: true, force: true });
-  } catch (e) {
-    console.error("[pass] Cleanup failed:", e.message);
+    // Failsafe: eksplicitno upiši na instancu (ako lib ignorira overrides)
+    pass.description        = pass.description        ?? passJson.description;
+    pass.organizationName   = pass.organizationName   ?? passJson.organizationName;
+    pass.passTypeIdentifier = pass.passTypeIdentifier ?? PASS_TYPE_IDENTIFIER;
+    pass.teamIdentifier     = pass.teamIdentifier     ?? TEAM_IDENTIFIER;
+    pass.serialNumber       = pass.serialNumber       ?? serial;
+
+    // 5) Debug koji MORA izaći u log prije asBuffer():
+    console.log("[pass] instance:", {
+      desc: pass.description,
+      org: pass.organizationName,
+      sn: pass.serialNumber,
+      pti: pass.passTypeIdentifier,
+      team: pass.teamIdentifier,
+    });
+
+    // 6) Sačuvaj pkpass fajl
+    const outDir = abs("./output");
+    ensureDir(outDir);
+    const outPath = path.join(outDir, `${serial}.pkpass`);
+    fs.writeFileSync(outPath, await pass.asBuffer());
+    
+    // 7) Očisti temp dir (optional)
+    try {
+      fs.rmSync(tmpModelDir, { recursive: true, force: true });
+    } catch (e) {
+      console.error("[pass] Cleanup failed:", e.message);
+    }
+
+    return outPath;
   }
-
-  return outPath;
-}
