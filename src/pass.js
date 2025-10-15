@@ -193,6 +193,9 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
 
     // prikazuj samo storeCard – ukloni ostale stilove ako su ostali u templateu
     for (const k of ["coupon","eventTicket","boardingPass","generic"]) delete passJson[k];
+    
+    passJson.foregroundColor = "rgb(255,255,255)";
+    passJson.labelColor = "rgb(255,255,255)";
 
     // osnovna meta
     passJson.organizationName   = ORG_NAME || "Klub Osmijeha";
