@@ -194,28 +194,57 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
   passJson.organizationName   = ORG_NAME || "Klub Osmijeha";
   passJson.passTypeIdentifier = PASS_TYPE_IDENTIFIER;
   passJson.teamIdentifier     = TEAM_IDENTIFIER;
-  passJson.barcode.message    = String(memberId);
-  passJson.barcode.altText    = String(memberId);
+    // --- BARCODE(S): plural + singl radi kompatibilnosti ---
+    passJson.barcodes = [{
+      message: String(memberId),
+      format: "PKBarcodeFormatCode128",
+      messageEncoding: "utf-8",
+      altText: String(memberId),
+    }];
 
-  passJson.storeCard = {
-    primaryFields: [
-      { key: "member", label: "ČLAN", value: String(fullName).toUpperCase() }
-    ],
-    secondaryFields: [
-      { key: "leftSpacer", label: "", value: "", textAlignment: "PKTextAlignmentLeft",  labelColor: "rgb(255,255,255)" },
-      { key: "memberFullName", label: "", value: String(fullName), textAlignment: "PKTextAlignmentCenter" },
-      { key: "rightSpacer", label: "", value: "", textAlignment: "PKTextAlignmentRight", labelColor: "rgb(255,255,255)" },
-    ],
-  };
-  passJson.backFields = [
-    { key: "info", label: "Informacije", value: "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243" },
-  ];
+    // (zadrži i singl barcode)
+    passJson.barcode = {
+      message: String(memberId),
+      format: "PKBarcodeFormatCode128",
+      messageEncoding: "utf-8",
+      altText: String(memberId),
+    };
+
+    // --- LAYOUT: samo primary field da bi "ČLAN" i barcode bili na prvoj strani ---
+    passJson.storeCard = {
+      primaryFields: [
+        { key: "member", label: "ČLAN", value: String(fullName).toUpperCase() }
+      ]
+      // Ako želiš dodatni tekst, stavi ga u auxiliaryFields (opcija):
+      // ,auxiliaryFields: [{ key: "memberFullName", label: "", value: String(fullName) }]
+    };
+
+    // Back strana (top-level, izvan storeCard)
+    passJson.backFields = [
+      {
+        key: "info",
+        label: "Informacije",
+        value:
+          "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243"
+      }
+      // možeš dodati još polja:
+      // { key: "terms", label: "Uslovi korištenja", value: "Neprenosivo..." },
+    ];
+
 
   // 3) Upis sa serialNumber
   const serial = serialNumber || `KOS-${memberId}`;
+  console.log("[pass] backFields (pre write):",
+      (passJson.backFields || []).map(f => `${f.key}:${f.label}`)
+    );
+
   fs.writeFileSync(finalPassPath, JSON.stringify({ ...passJson, serialNumber: serial }, null, 2));
 
   const recheck = JSON.parse(fs.readFileSync(finalPassPath, "utf8"));
+  console.log("[pass] backFields (recheck):",
+      (recheck.backFields || []).map(f => `${f.key}:${f.label}`)
+    );
+
   console.log("[pass] recheck.description:", recheck.description, "| serial:", recheck.serialNumber);
 
     // 4) Učitaj Template i postavi cert/ključ NA TEMPLATE
