@@ -173,27 +173,39 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
   }
   // --- KRAJ KRITIČNOG DEBUG BLOKA ---
 
-  // 1) Priprema modela na disku: novi pass.json + kopiraj slike
-  const templateDir = loadTemplateDir();
-  const tmpModelDir = fs.mkdtempSync(path.join("/tmp", "model-"));
-  ensureDir(tmpModelDir);
+    // NOVI KOD ZA KOPIRANJE SLIKA:
+    // 1) Priprema modela na disku: novi pass.json + kopiraj slike
+    const templateDir = loadTemplateDir();
+    console.log("[pass] templateDir:", templateDir);
 
-  const images = [
-      { name: "icon.png", required: true },
-      { name: "icon@2x.png", required: true },
-      { name: "logo.png", required: true },
-      { name: "strip.png", required: false },
-      { name: "strip@2x.png", required: false },
-  ];
+    // Šta sve postoji u templateu?
+    const templateFiles = fs.readdirSync(templateDir);
+    console.log("[pass] template assets:", templateFiles);
 
-  for (const img of images) {
-    const src = path.join(templateDir, img.name);
-    if (fs.existsSync(src)) {
-      fs.copyFileSync(src, path.join(tmpModelDir, img.name));
-    } else if (img.required) {
-      throw new Error(`Missing required image: ${img.name} in ${templateDir}`);
+    // Kreiraj tmp model
+    const tmpModelDir = fs.mkdtempSync(path.join("/tmp", "model-"));
+    ensureDir(tmpModelDir);
+
+    // Kopiraj SVE PNG fajlove (case-sensitive imena zadržavamo ista)
+    for (const name of templateFiles) {
+      if (name.endsWith(".png") || name.toLowerCase() === "pass.json") {
+        const src = path.join(templateDir, name);
+        const dst = path.join(tmpModelDir, name);
+        fs.copyFileSync(src, dst);
+      }
     }
-  }
+
+    // Nakon kopiranja: šta je stvarno u modelu?
+    const modelFiles = fs.readdirSync(tmpModelDir);
+    console.log("[pass] model assets:", modelFiles);
+
+    // Minimalni obavezni set (za @walletpass/pass-js)
+    const mustHave = ["icon.png", "icon@2x.png", "logo.png"];
+    for (const req of mustHave) {
+      if (!modelFiles.includes(req)) {
+        throw new Error(`[FATAL] Required image missing in model: ${req}. Present: ${modelFiles.join(", ")}. Is your templates folder tracked by Git?`);
+      }
+    }
   
   // 2) Kreiraj pass.json objekt
     const passJson = {
