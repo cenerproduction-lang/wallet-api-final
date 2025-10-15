@@ -194,8 +194,6 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
     // prikazuj samo storeCard – ukloni ostale stilove ako su ostali u templateu
     for (const k of ["coupon","eventTicket","boardingPass","generic"]) delete passJson[k];
     
-    passJson.foregroundColor = "rgb(255,255,255)";
-    passJson.labelColor = "rgb(255,255,255)";
 
     // osnovna meta
     passJson.organizationName   = ORG_NAME || "Klub Osmijeha";
@@ -222,7 +220,12 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
     // layout: veliki natpis ČLAN + ime na prvoj strani
     passJson.storeCard = {
       primaryFields: [
-        { key: "member", label: "ČLAN", value: String(fullName).toUpperCase() }
+        {
+          key: "member",
+          label: "ČLAN",
+          value: String(fullName),               // bez .toUpperCase()
+          textAlignment: "PKTextAlignmentCenter" // centrira kao na slici
+        }
       ]
     };
 
@@ -231,8 +234,7 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
       {
         key: "info",
         label: "Informacije",
-        value:
-          "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243"
+        value: "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243"
       }
       // možeš dodati još polja:
       // { key: "terms", label: "Uslovi korištenja", value: "Neprenosivo..." },
