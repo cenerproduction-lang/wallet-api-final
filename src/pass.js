@@ -174,87 +174,82 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
   // --- KRAJ KRITIČNOG DEBUG BLOKA ---
 
     // NOVI KOD ZA KOPIRANJE SLIKA:
-    // 1) Priprema modela na disku: novi pass.json + kopiraj slike
-    const templateDir = loadTemplateDir();
-    console.log("[pass] templateDir:", templateDir);
+    // NOVI KOD: Sve radi u RAM-u (Bufferi), bez privremenih foldera
 
-    // Šta sve postoji u templateu?
+    // 1) Model: Učitaj template i sve datoteke u Buffer
+    const templateDir = loadTemplateDir();
     const templateFiles = fs.readdirSync(templateDir);
+    const inMemoryModel = {};
+
     console.log("[pass] template assets:", templateFiles);
 
-    // Kreiraj tmp model
-    const tmpModelDir = fs.mkdtempSync(path.join("/tmp", "model-"));
-    ensureDir(tmpModelDir);
-
-    // Kopiraj SVE PNG fajlove (case-sensitive imena zadržavamo ista)
+    // Učitaj SVE PNG i pass.json datoteke u memoriju kao Buffere
     for (const name of templateFiles) {
       if (name.endsWith(".png") || name.toLowerCase() === "pass.json") {
         const src = path.join(templateDir, name);
-        const dst = path.join(tmpModelDir, name);
-        fs.copyFileSync(src, dst);
+        inMemoryModel[name] = fs.readFileSync(src);
       }
     }
+    console.log("[pass] in-memory model keys:", Object.keys(inMemoryModel));
 
-    // Nakon kopiranja: šta je stvarno u modelu?
-    const modelFiles = fs.readdirSync(tmpModelDir);
-    console.log("[pass] model assets:", modelFiles);
-
-    // Minimalni obavezni set (za @walletpass/pass-js)
+    // 2) Kreiraj pass.json objekt iz in-memory buffera i unesi podatke
     const mustHave = ["icon.png", "icon@2x.png", "logo.png"];
     for (const req of mustHave) {
-      if (!modelFiles.includes(req)) {
-        throw new Error(`[FATAL] Required image missing in model: ${req}. Present: ${modelFiles.join(", ")}. Is your templates folder tracked by Git?`);
+      if (!inMemoryModel[req]) {
+        throw new Error(`[FATAL] Required image missing in memory model: ${req}.`);
       }
     }
-  
-  // 2) Kreiraj pass.json objekt
-    const passJson = {
-      formatVersion: 1,
-      description: "Loyalty kartica",
-      organizationName: ORG_NAME, // Koristi ORG_NAME koji je već obrađen u ENV sekciji
-      passTypeIdentifier: PASS_TYPE_IDENTIFIER,
-      teamIdentifier: TEAM_IDENTIFIER,
-      backgroundColor: "rgb(255,255,255)",
-      foregroundColor: "rgb(31,41,55)",
-      labelColor: "rgb(31,41,55)",
-      suppressStripShine: true,
-      barcode: {
-        message: String(memberId),
-        format: "PKBarcodeFormatCode128",
-        messageEncoding: "utf-8",
-        altText: String(memberId),
-      },
-      storeCard: {
-        primaryFields: [
-          { key: "member", label: "ČLAN", value: String(fullName).toUpperCase() }
-        ],
-        secondaryFields: [
-          { key: "leftSpacer", label: "", value: "", textAlignment: "PKTextAlignmentLeft",  labelColor: "rgb(255,255,255)" },
-          { key: "memberFullName", label: "", value: String(fullName), textAlignment: "PKTextAlignmentCenter" },
-          { key: "rightSpacer", label: "", value: "", textAlignment: "PKTextAlignmentRight", labelColor: "rgb(255,255,255)" },
-        ],
-      },
-      backFields: [
-        { key: "info", label: "Informacije", value: "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243" },
-      ],
-    };
 
-    // 3) Upiši finalni JSON (sa serialNumberom) na disk
+    // Dekodiraj pass.json buffer, unesi podatke, i kodiraj nazad u buffer
+    const basePassJsonBuffer = inMemoryModel["pass.json"];
+    const passJson = JSON.parse(basePassJsonBuffer.toString('utf8'));
+
+    // Ovdje je originalna logika popunjavanja polja:
+    passJson.organizationName = ORG_NAME;
+    passJson.passTypeIdentifier = PASS_TYPE_IDENTIFIER;
+    passJson.teamIdentifier = TEAM_IDENTIFIER;
+    passJson.barcode.message = String(memberId);
+    passJson.barcode.altText = String(memberId);
+    passJson.storeCard.primaryFields = [
+      { key: "member", label: "ČLAN", value: String(fullName).toUpperCase() }
+    ];
+    passJson.storeCard.secondaryFields[1].value = String(fullName); // MemberFullName
+
+    // Dodavanje backField-ova (ako su izbačeni)
+    passJson.backFields = [
+      { key: "info", label: "Informacije", value: "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243" },
+    ];
+    // KRAJ originalne logike popunjavanja polja
+
+    // 3) Upiši finalni JSON (sa serialNumberom) NAZAD u inMemoryModel
     const serial = serialNumber || `KOS-${memberId}`;
-    const finalPassPath = path.join(tmpModelDir, "pass.json");
-    // Upiši passJson + serialNumber na disk
-    fs.writeFileSync(finalPassPath, JSON.stringify({ ...passJson, serialNumber: serial }, null, 2));
+    const merged = { ...passJson, serialNumber: serial };
+
+    // AŽURIRAJ pass.json u memoriji s novim podacima
+    inMemoryModel["pass.json"] = Buffer.from(JSON.stringify(merged, null, 2), 'utf8');
 
     // --- KRITIČNO DEBUG LOGIRANJE FAJLA (ostaje za provjeru) ---
-    const recheck = JSON.parse(fs.readFileSync(finalPassPath, "utf8"));
-    console.log("[pass] recheck.description:", recheck.description, "| serial:", recheck.serialNumber);
-    try {
-        const stats = fs.statSync(finalPassPath);
-        console.log(`[pass] DEBUG: Final pass.json size: ${stats.size} bytes at ${finalPassPath}`);
-    } catch (error) {
-        console.error(`[pass] DEBUG: ERROR accessing final pass.json at ${finalPassPath}:`, error.message);
-    }
+    const recheck = JSON.parse(inMemoryModel["pass.json"].toString('utf8'));
+    console.log("[pass] recheck.description (in-memory):", recheck.description, "| serial:", recheck.serialNumber);
     // --- KRAJ DEBUG LOGIRANJA ---
+
+
+    // 4) Kreiraj Pass objekt – koristi MEMORIJSKI model!
+    const overrides = {
+      description: recheck.description, // Koristi recheck jer sadrži serijal
+      organizationName: recheck.organizationName,
+      passTypeIdentifier: PASS_TYPE_IDENTIFIER,
+      teamIdentifier: TEAM_IDENTIFIER,
+      serialNumber: serial,
+    };
+
+    const pass = new Pass({
+      model: inMemoryModel, // <--- KLJUČNO: KORISTIMO OBJEKT, NE PATH!
+      certificates,
+      overrides,
+    });
+
+    // ... ostatak koda (od pass.description = pass.description ?? recheck.description; pa nadalje) je u redu i samo se nastavlja.
 
     // 4) Kreiraj Pass objekt – minimalni overrides (samo obavezna polja)
     const overrides = {
