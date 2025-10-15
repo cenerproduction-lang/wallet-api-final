@@ -145,155 +145,136 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
           signerCert: fs.readFileSync(certs.p12File),
           signerKeyPassphrase: certs.p12Pass,
         };
-        
-  // --- KRITIČNI DEBUG BLOK: PROVJERA ENV vs CERT ---
+
+  // (debug) ENV vs CERT
   try {
     const subj = readCertSubject(certs);
     const { passTypeFromCN, teamFromOU } = parseCNandOU(subj);
-
     const ENV_PASS = clean(PASS_TYPE_IDENTIFIER);
     const ENV_TEAM = clean(TEAM_IDENTIFIER);
-
     console.log("-----------------------------------------");
     console.log("[DEBUG] ENV PASS_TYPE_IDENTIFIER:", JSON.stringify(ENV_PASS));
-    console.log("[DEBUG] ENV TEAM_IDENTIFIER:     ", JSON.stringify(ENV_TEAM));
-    console.log("[DEBUG] CERT CN (Pass Type ID):  ", JSON.stringify(passTypeFromCN));
-    console.log("[DEBUG] CERT OU (Team ID):       ", JSON.stringify(teamFromOU));
+    console.log("[DEBUG] ENV TEAM_IDENTIFIER:      ", JSON.stringify(ENV_TEAM));
+    console.log("[DEBUG] CERT CN (Pass Type ID):   ", JSON.stringify(passTypeFromCN));
+    console.log("[DEBUG] CERT OU (Team ID):        ", JSON.stringify(teamFromOU));
     console.log("-----------------------------------------");
-
-    if (!passTypeFromCN || !teamFromOU) {
-      console.error("[DEBUG] Certifikat ne sadrži validan CN/OU.");
-    } else if (passTypeFromCN !== ENV_PASS) {
-      throw new Error(`[FATAL] PASS_TYPE_IDENTIFIER MISMATCH. ENV=${ENV_PASS} vs CERT=${passTypeFromCN}`);
-    } else if (teamFromOU !== ENV_TEAM) {
-      throw new Error(`[FATAL] TEAM_IDENTIFIER MISMATCH. ENV=${ENV_TEAM} vs CERT=${teamFromOU}`);
-    }
+    if (!passTypeFromCN || !teamFromOU) console.error("[DEBUG] Certifikat ne sadrži validan CN/OU.");
+    else if (passTypeFromCN !== ENV_PASS) throw new Error(`[FATAL] PASS_TYPE_IDENTIFIER MISMATCH. ENV=${ENV_PASS} vs CERT=${passTypeFromCN}`);
+    else if (teamFromOU !== ENV_TEAM)    throw new Error(`[FATAL] TEAM_IDENTIFIER MISMATCH. ENV=${ENV_TEAM} vs CERT=${teamFromOU}`);
   } catch (e) {
-      console.error("[DEBUG] Cert check failed, continuing:", e.message);
+    console.error("[DEBUG] Cert check failed, continuing:", e.message);
   }
-  // --- KRAJ KRITIČNOG DEBUG BLOKA ---
 
-    // NOVI KOD ZA KOPIRANJE SLIKA:
-    // NOVI KOD: Sve radi u RAM-u (Bufferi), bez privremenih foldera
+  // 1) Model: kopiraj assete u tmp dir
+  const templateDir = loadTemplateDir();
+  const tmpModelDir = fs.mkdtempSync(path.join("/tmp", "model-"));
+  ensureDir(tmpModelDir);
 
-    // 1) Model: Učitaj template i sve datoteke u Buffer
-    const templateDir = loadTemplateDir();
-    const templateFiles = fs.readdirSync(templateDir);
-    const inMemoryModel = {};
+  const templateFiles = fs.readdirSync(templateDir);
+  console.log("[pass] template assets:", templateFiles);
 
-    console.log("[pass] template assets:", templateFiles);
-
-    // Učitaj SVE PNG i pass.json datoteke u memoriju kao Buffere
-    for (const name of templateFiles) {
-      if (name.endsWith(".png") || name.toLowerCase() === "pass.json") {
-        const src = path.join(templateDir, name);
-        inMemoryModel[name] = fs.readFileSync(src);
-      }
+  for (const name of templateFiles) {
+    if (name.endsWith(".png") || name.toLowerCase() === "pass.json") {
+      fs.copyFileSync(path.join(templateDir, name), path.join(tmpModelDir, name));
     }
-    console.log("[pass] in-memory model keys:", Object.keys(inMemoryModel));
+  }
 
-    // 2) Kreiraj pass.json objekt iz in-memory buffera i unesi podatke
-    const mustHave = ["icon.png", "icon@2x.png", "logo.png"];
-    for (const req of mustHave) {
-      if (!inMemoryModel[req]) {
-        throw new Error(`[FATAL] Required image missing in memory model: ${req}.`);
-      }
+  // minimalni obavezni set (icon 1x/2x)
+  const mustHave = ["icon.png", "icon@2x.png"];
+  for (const req of mustHave) {
+    if (!fs.existsSync(path.join(tmpModelDir, req))) {
+      throw new Error(`[FATAL] Required image missing in model: ${req}.`);
     }
+  }
 
-    // Dekodiraj pass.json buffer, unesi podatke, i kodiraj nazad u buffer
-    const basePassJsonBuffer = inMemoryModel["pass.json"];
-    const passJson = JSON.parse(basePassJsonBuffer.toString('utf8'));
+  // 2) Učitaj i popuni pass.json
+  const finalPassPath = path.join(tmpModelDir, "pass.json");
+  const passJson = JSON.parse(fs.readFileSync(finalPassPath, "utf8"));
 
-    // Ovdje je originalna logika popunjavanja polja:
-    passJson.organizationName = ORG_NAME;
-    passJson.passTypeIdentifier = PASS_TYPE_IDENTIFIER;
-    passJson.teamIdentifier = TEAM_IDENTIFIER;
-    passJson.barcode.message = String(memberId);
-    passJson.barcode.altText = String(memberId);
-    passJson.storeCard.primaryFields = [
+  passJson.organizationName   = ORG_NAME || "Klub Osmijeha";
+  passJson.passTypeIdentifier = PASS_TYPE_IDENTIFIER;
+  passJson.teamIdentifier     = TEAM_IDENTIFIER;
+  passJson.barcode.message    = String(memberId);
+  passJson.barcode.altText    = String(memberId);
+
+  passJson.storeCard = {
+    primaryFields: [
       { key: "member", label: "ČLAN", value: String(fullName).toUpperCase() }
-    ];
-    passJson.storeCard.secondaryFields[1].value = String(fullName); // MemberFullName
+    ],
+    secondaryFields: [
+      { key: "leftSpacer", label: "", value: "", textAlignment: "PKTextAlignmentLeft",  labelColor: "rgb(255,255,255)" },
+      { key: "memberFullName", label: "", value: String(fullName), textAlignment: "PKTextAlignmentCenter" },
+      { key: "rightSpacer", label: "", value: "", textAlignment: "PKTextAlignmentRight", labelColor: "rgb(255,255,255)" },
+    ],
+  };
+  passJson.backFields = [
+    { key: "info", label: "Informacije", value: "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243" },
+  ];
 
-    // Dodavanje backField-ova (ako su izbačeni)
-    passJson.backFields = [
-      { key: "info", label: "Informacije", value: "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243" },
-    ];
-    // KRAJ originalne logike popunjavanja polja
+  // 3) Upis sa serialNumber
+  const serial = serialNumber || `KOS-${memberId}`;
+  fs.writeFileSync(finalPassPath, JSON.stringify({ ...passJson, serialNumber: serial }, null, 2));
 
-    // 3) Upiši finalni JSON (sa serialNumberom) NAZAD u inMemoryModel
-    const serial = serialNumber || `KOS-${memberId}`;
-    const merged = { ...passJson, serialNumber: serial };
+  const recheck = JSON.parse(fs.readFileSync(finalPassPath, "utf8"));
+  console.log("[pass] recheck.description:", recheck.description, "| serial:", recheck.serialNumber);
 
-    // AŽURIRAJ pass.json u memoriji s novim podacima
-    inMemoryModel["pass.json"] = Buffer.from(JSON.stringify(merged, null, 2), 'utf8');
+  // 4) Kreiraj Pass – minimalni overrides
+  const overrides = {
+    description: recheck.description,
+    organizationName: recheck.organizationName,
+    passTypeIdentifier: PASS_TYPE_IDENTIFIER,
+    teamIdentifier: TEAM_IDENTIFIER,
+    serialNumber: serial,
+  };
 
-    // --- KRITIČNO DEBUG LOGIRANJE FAJLA (ostaje za provjeru) ---
-    const recheck = JSON.parse(inMemoryModel["pass.json"].toString('utf8'));
-    console.log("[pass] recheck.description (in-memory):", recheck.description, "| serial:", recheck.serialNumber);
-    // --- KRAJ DEBUG LOGIRANJA ---
+  const pass = new Pass({
+    model: tmpModelDir,
+    certificates,
+    overrides,
+  });
 
+  // Failsafe: upiši direktno na instancu
+  pass.description        = pass.description        ?? recheck.description;
+  pass.organizationName   = pass.organizationName   ?? recheck.organizationName;
+  pass.passTypeIdentifier = pass.passTypeIdentifier ?? PASS_TYPE_IDENTIFIER;
+  pass.teamIdentifier     = pass.teamIdentifier     ?? TEAM_IDENTIFIER;
+  pass.serialNumber       = pass.serialNumber       ?? serial;
 
-    // 4) Kreiraj Pass objekt – koristi MEMORIJSKI model!
-    const overrides = {
-      description: recheck.description, // Koristi recheck jer sadrži serijal
-      organizationName: recheck.organizationName,
-      passTypeIdentifier: PASS_TYPE_IDENTIFIER,
-      teamIdentifier: TEAM_IDENTIFIER,
-      serialNumber: serial,
-    };
-
-    const pass = new Pass({
-      model: inMemoryModel, // <--- KLJUČNO: KORISTIMO OBJEKT, NE PATH!
-      certificates,
-      overrides,
-    });
-
-    // ... ostatak koda (od pass.description = pass.description ?? recheck.description; pa nadalje) je u redu i samo se nastavlja.
-
-    // 4) Kreiraj Pass objekt – minimalni overrides (samo obavezna polja)
-    const overrides = {
-      description: passJson.description,
-      organizationName: passJson.organizationName,
-      passTypeIdentifier: PASS_TYPE_IDENTIFIER,
-      teamIdentifier: TEAM_IDENTIFIER,
-      serialNumber: serial,
-    };
-    
-    const pass = new Pass({
-      model: tmpModelDir,
-      certificates,
-      overrides,
-    });
-
-    // Failsafe: eksplicitno upiši na instancu (ako lib ignorira overrides)
-    pass.description        = pass.description        ?? passJson.description;
-    pass.organizationName   = pass.organizationName   ?? passJson.organizationName;
-    pass.passTypeIdentifier = pass.passTypeIdentifier ?? PASS_TYPE_IDENTIFIER;
-    pass.teamIdentifier     = pass.teamIdentifier     ?? TEAM_IDENTIFIER;
-    pass.serialNumber       = pass.serialNumber       ?? serial;
-
-    // 5) Debug koji MORA izaći u log prije asBuffer():
-    console.log("[pass] instance:", {
-      desc: pass.description,
-      org: pass.organizationName,
-      sn: pass.serialNumber,
-      pti: pass.passTypeIdentifier,
-      team: pass.teamIdentifier,
-    });
-
-    // 6) Sačuvaj pkpass fajl
-    const outDir = abs("./output");
-    ensureDir(outDir);
-    const outPath = path.join(outDir, `${serial}.pkpass`);
-    fs.writeFileSync(outPath, await pass.asBuffer());
-    
-    // 7) Očisti temp dir (optional)
-    try {
-      fs.rmSync(tmpModelDir, { recursive: true, force: true });
-    } catch (e) {
-      console.error("[pass] Cleanup failed:", e.message);
+  // 5) Eksplicitno prikači slike (ključ + density)
+  const imageMap = [
+    { key: "icon",  files: ["icon.png", "icon@2x.png", "icon@3x.png"] },
+    { key: "logo",  files: ["logo.png", "logo@2x.png", "logo@3x.png"] },
+    { key: "strip", files: ["strip.png", "strip@2x.png", "strip@3x.png"] },
+  ];
+  for (const { key, files } of imageMap) {
+    for (const f of files) {
+      const p = path.join(tmpModelDir, f);
+      if (fs.existsSync(p)) {
+        const buf = fs.readFileSync(p);
+        const density = f.includes("@3x") ? "3x" : f.includes("@2x") ? "2x" : undefined;
+        await pass.images.add(key, buf, density);
+        console.log(`[pass] added image: ${key} ${density || "1x"}`);
+      }
     }
-
-    return outPath;
   }
+
+  console.log("[pass] instance:", {
+    desc: pass.description,
+    org: pass.organizationName,
+    sn: pass.serialNumber,
+    pti: pass.passTypeIdentifier,
+    team: pass.teamIdentifier,
+  });
+
+  // 6) Snimi pkpass
+  const outDir = abs("./output");
+  ensureDir(outDir);
+  const outPath = path.join(outDir, `${serial}.pkpass`);
+  fs.writeFileSync(outPath, await pass.asBuffer());
+
+  // 7) Čišćenje
+  try { fs.rmSync(tmpModelDir, { recursive: true, force: true }); }
+  catch (e) { console.error("[pass] Cleanup failed:", e.message); }
+
+  return outPath;
+}
