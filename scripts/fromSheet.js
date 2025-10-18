@@ -10,7 +10,8 @@ const normalizeRow = r => {
   const memberId = norm(r.barcode_value || r.memberId);
   const status = norm(r.status).toUpperCase() || "PENDING";
   const serialNumber = norm(r.serial) || (memberId ? `KOS-${memberId}` : "");
-  return { fullName, memberId, status, serialNumber };
+  const email = norm(r.email); // <-- NOVO: Učitavamo email polje
+  return { fullName, memberId, status, serialNumber, email }; // <-- NOVO: Vraćamo email
 };
 
 async function mapLimited(items, limit, worker) {
@@ -30,7 +31,8 @@ async function main() {
     const res = await fetch(`${API_URL}/passes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fullName: r.fullName, memberId: r.memberId, serialNumber: r.serialNumber })
+      // <-- NOVO: Dodajemo email u body zahtjeva
+      body: JSON.stringify({ fullName: r.fullName, memberId: r.memberId, serialNumber: r.serialNumber, email: r.email })
     });
     const text = await res.text();
     let json; try { json = JSON.parse(text); } catch { json = { raw: text }; }
