@@ -1,11 +1,11 @@
-// src/index.js (Novi, kompletan sadržaj)
+// src/index.js (Novi, kompletan sadržaj s Nodemailerom)
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createStoreCardPass } from "./pass.js";
 import nodemailer from "nodemailer"; // <-- NOVO: Nodemailer
 
-// Uklanjamo import { startWorker } from "./worker.js"; jer worker.js brišemo.
+// Uklanjamo import { startWorker } from "./worker.js";
 
 const app = express();
 app.use(express.json());
@@ -26,7 +26,7 @@ const transporter = nodemailer.createTransport({
 });
 
 // --- FUNKCIJA ZA SLANJE EMAILA (Dodano) ---
-async function sendPassEmail(toEmail, fullName, passPath, passUrl) {
+async function sendPassEmail(toEmail, fullName, passPath) {
     const mailOptions = {
         from: SENDER_EMAIL,
         to: toEmail,
@@ -48,7 +48,6 @@ async function sendPassEmail(toEmail, fullName, passPath, passUrl) {
     try {
         await transporter.sendMail(mailOptions);
         console.log(`[mail] Email uspješno poslan na: ${toEmail} sa prilogom.`);
-        // Vratite URL kako biste ga mogli zapisati u Sheets (ako je potrebno)
         return true;
     } catch (error) {
         console.error(`[mail] Greška pri slanju e-maila na ${toEmail}:`, error.message);
@@ -62,42 +61,41 @@ app.get("/", (_req, res) => res.send("Wallet API OK"));
 
 
 app.post("/passes", async (req, res) => {
-  try {
-    // NOVO: Dodajemo 'email' u destrukciju
-    const { fullName, memberId, serialNumber, email } = req.body || {};
-    
-    // NOVO: Provjera email-a
-    if (!fullName || !memberId || !email) {
-      return res.status(400).json({ ok: false, error: "fullName, memberId, and email are required" });
-    }
-    
-    // 1. Kreiraj Pass
-    const outPath = await createStoreCardPass({ fullName, memberId, serialNumber });
-    const fileName = path.basename(outPath);
-    const passUrl = `${PUBLIC_URL}/download/${encodeURIComponent(fileName)}`; // Koristimo PUBLIC_URL
-    
-    // 2. Pošalji e-mail
-    const emailSent = await sendPassEmail(email, fullName, outPath, passUrl);
+    try {
+        // NOVO: Dodajemo 'email' u destrukciju
+        const { fullName, memberId, serialNumber, email } = req.body || {};
+        
+        // NOVO: Provjera email-a (sada je obavezan)
+        if (!fullName || !memberId || !email) {
+            return res.status(400).json({ ok: false, error: "fullName, memberId, and email are required" });
+        }
+        
+        // 1. Kreiraj Pass
+        const outPath = await createStoreCardPass({ fullName, memberId, serialNumber });
+        const fileName = path.basename(outPath);
+        const passUrl = `${PUBLIC_URL || ''}/download/${encodeURIComponent(fileName)}`;
+        
+        // 2. Pošalji e-mail
+        const emailSent = await sendPassEmail(email, fullName, outPath);
 
-    if (!emailSent) {
-      // Ako e-mail ne ode, ne želimo da fromSheet misli da je sve u redu
-      throw new Error("Pass generated, but email sending failed.");
+        if (!emailSent) {
+            throw new Error("Pass generated, but email sending failed. Check SMTP settings.");
+        }
+        
+        // 3. Pošalji odgovor natrag fromSheet.js
+        return res.status(200).json({
+            ok: true,
+            url: passUrl,
+            serialNumber: fileName.replace(/\.pkpass$/i, "")
+        });
+    } catch (e) {
+        console.error("POST /passes error:", e);
+        return res.status(500).json({
+            ok: false,
+            error: String(e?.message || e),
+            stack: String(e?.stack || "")
+        });
     }
-    
-    // 3. Pošalji odgovor natrag fromSheet.js
-    return res.status(200).json({
-      ok: true,
-      url: passUrl, // Koristimo full URL ovdje
-      serialNumber: fileName.replace(/\.pkpass$/i, "")
-    });
-  } catch (e) {
-    console.error("POST /passes error:", e);
-    return res.status(500).json({
-      ok: false,
-      error: String(e?.message || e),
-      stack: String(e?.stack || "")
-    });
-  }
 });
 
 const __filename = fileURLToPath(import.meta.url);
@@ -109,10 +107,4 @@ app.use("/download", express.static(path.resolve(__dirname, "../output")));
 const port = process.env.PORT || 8080;
 app.listen(port, () => console.log("Wallet API listening on :", port));
 
-// UKLANJAMO startWorker() jer je bio referenca na nepostojeći worker.js
-// Uklonili smo:
-// if (String(process.env.ENABLE_WORKER || "true").toLowerCase() === "true") {
-//   startWorker();
-// } else {
-//   console.log("[worker] Disabled (ENABLE_WORKER!=true)");
-// }
+// UKLONJEN JE CIJELI BLOK KOJI JE ZVAO startWorker()
