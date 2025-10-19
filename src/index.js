@@ -1,56 +1,66 @@
-// src/index.js (Novi, kompletan sadržaj s Nodemailerom)
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createStoreCardPass } from "./pass.js";
-import nodemailer from "nodemailer"; // <-- NOVO: Nodemailer
-
-// Uklanjamo import { startWorker } from "./worker.js";
+import nodemailer from "nodemailer";
 
 const app = express();
 app.use(express.json());
 
-// --- ENV ZA EMAIL (Dodano) ---
+// --- ENV ZA EMAIL ---
 const { PUBLIC_URL, SENDER_EMAIL, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
 
-// Nodemailer Transporter
+// --- NODEMAILER TRANSPORTER (POJAČANO) ---
+const effPort = Number(SMTP_PORT || 587); // Efektivni port
+
 const transporter = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: parseInt(SMTP_PORT),
-    secure: false, // Koristite 'false' za port 587 (STARTTLS)
-    requireTLS: true,
+    host: SMTP_HOST || "smtp.gmail.com",
+    port: effPort,
+    // secure = true samo ako je port 465 (Gmail SSL)
+    secure: effPort === 465,
+    // requireTLS = true samo ako je port 587 (Gmail STARTTLS)
+    requireTLS: effPort === 587,
     auth: {
         user: SMTP_USER,
         pass: SMTP_PASS,
     },
 });
 
-// --- FUNKCIJA ZA SLANJE EMAILA (Dodano) ---
-async function sendPassEmail(toEmail, fullName, passPath) {
-    const mailOptions = {
-        from: SENDER_EMAIL,
-        to: toEmail,
-        subject: `Vaša Klub Osmijeha - Loyalty kartica je spremna!`,
-        html: `
-            <p>Poštovani/a ${fullName},</p>
-            <p>Vaša kartica **Klub Osmijeha** je u prilogu. Molimo Vas da preuzmete **.pkpass** fajl.</p>
-            <p>Klikom na fajl, automatski ćete je dodati u Apple Wallet (ili kompatibilni Google Pay/Wallet na Androidu).</p>
-            <p>Hvala Vam na lojalnosti.</p>
-            <p>S poštovanjem,<br>Klub Osmijeha</p>
-        `,
-        attachments: [{
-            filename: path.basename(passPath),
-            path: passPath,
-            contentType: 'application/vnd.apple.pkpass' // Ključni MIME tip
-        }]
-    };
+// LOG: verifikacija konekcije (pomoći će nam da vidimo tačan razlog ako ne radi)
+transporter.verify((err) => {
+    if (err) {
+        console.error("[smtp] verify FAILED:", err.code || "", err.message || "", err.response || "");
+    } else {
+        console.log("[smtp] verify OK");
+    }
+});
+// ------------------------------------------
 
+// --- FUNKCIJA ZA SLANJE EMAILA (POJAČANO LOGIRANJE I HTML) ---
+async function sendPassEmail(toEmail, fullName, passPath) {
     try {
-        await transporter.sendMail(mailOptions);
-        console.log(`[mail] Email uspješno poslan na: ${toEmail} sa prilogom.`);
+        await transporter.sendMail({
+            from: SENDER_EMAIL,
+            to: toEmail,
+            subject: "Vaša Klub Osmijeha - Loyalty kartica je spremna!",
+            html: `
+                <p>Poštovani/a ${fullName},</p>
+                <p>Vaša kartica <strong>Klub Osmijeha</strong> je u prilogu. Preuzmite <strong>.pkpass</strong> fajl i otvorite ga na iPhoneu (Apple Wallet).</p>
+                <p>Napomena: Na Androidu koristite aplikaciju za .pkpass (npr. WalletPasses).</p>
+                <p>Hvala Vam na lojalnosti.</p>
+                <p>S poštovanjem,<br>Klub Osmijeha</p>
+            `,
+            attachments: [{
+                filename: path.basename(passPath),
+                path: passPath,
+                contentType: 'application/vnd.apple.pkpass' // Ključni MIME tip
+            }]
+        });
+        console.log(`[mail] OK -> ${toEmail}`);
         return true;
-    } catch (error) {
-        console.error(`[mail] Greška pri slanju e-maila na ${toEmail}:`, error.message);
+    } catch (e) {
+        // Pojačano logiranje greške pri slanju
+        console.error("[mail] FAIL:", e.code || "", e.message || "", e.response || "");
         return false;
     }
 }
@@ -61,34 +71,39 @@ app.get("/", (_req, res) => res.send("Wallet API OK"));
 
 
 app.post("/passes", async (req, res) => {
+    // 1. Validacija (POJAČANA)
+    const body = req.body || {};
+    const missing = ["fullName", "memberId", "email"].filter(k => !body[k] || String(body[k]).trim() === "");
+    if (missing.length) return res.status(400).json({ ok: false, error: "missing_fields", missing });
+
+    const badEmail = !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.email);
+    if (badEmail) return res.status(400).json({ ok: false, error: "invalid_email", email: body.email });
+    
+    // Podaci su čisti
+    const { fullName, memberId, serialNumber, email } = body;
+
     try {
-        // NOVO: Dodajemo 'email' u destrukciju
-        const { fullName, memberId, serialNumber, email } = req.body || {};
-        
-        // NOVO: Provjera email-a (sada je obavezan)
-        if (!fullName || !memberId || !email) {
-            return res.status(400).json({ ok: false, error: "fullName, memberId, and email are required" });
-        }
-        
-        // 1. Kreiraj Pass
+        // 2. Kreiraj Pass
         const outPath = await createStoreCardPass({ fullName, memberId, serialNumber });
         const fileName = path.basename(outPath);
         const passUrl = `${PUBLIC_URL || ''}/download/${encodeURIComponent(fileName)}`;
         
-        // 2. Pošalji e-mail
+        // 3. Pošalji e-mail
         const emailSent = await sendPassEmail(email, fullName, outPath);
 
         if (!emailSent) {
+            // Bacamo grešku koju će uhvatiti donji catch blok
             throw new Error("Pass generated, but email sending failed. Check SMTP settings.");
         }
         
-        // 3. Pošalji odgovor natrag fromSheet.js
+        // 4. Pošalji odgovor natrag fromSheet.js
         return res.status(200).json({
             ok: true,
             url: passUrl,
             serialNumber: fileName.replace(/\.pkpass$/i, "")
         });
     } catch (e) {
+        // Ovaj catch blok će uhvatiti i grešku iz sendPassEmail
         console.error("POST /passes error:", e);
         return res.status(500).json({
             ok: false,
@@ -106,5 +121,3 @@ app.use("/download", express.static(path.resolve(__dirname, "../output")));
 
 const port = process.env.PORT || 8080;
 app.listen(port, () => console.log("Wallet API listening on :", port));
-
-// UKLONJEN JE CIJELI BLOK KOJI JE ZVAO startWorker()
