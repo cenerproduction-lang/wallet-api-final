@@ -2,108 +2,65 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createStoreCardPass } from "./pass.js";
-import nodemailer from "nodemailer";
+// Nodemailer i logika za slanje e-maila su uklonjeni
+// jer slanje preuzima Google Apps Script.
 
 const app = express();
 app.use(express.json());
 
-// --- ENV ZA EMAIL ---
-const { PUBLIC_URL, SENDER_EMAIL, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
+// --- ENV ZA SKIP EMAIL I PUBLIC_URL ---
+const { PUBLIC_URL } = process.env;
+const SKIP_EMAIL_ENV = process.env.SKIP_EMAIL === "true";
 
-// --- NODEMAILER TRANSPORTER (POJAČANO) ---
-const effPort = Number(SMTP_PORT || 587); // Efektivni port
-
-const transporter = nodemailer.createTransport({
-    host: SMTP_HOST || "smtp.gmail.com",
-    port: effPort,
-    // secure = true samo ako je port 465 (Gmail SSL)
-    secure: effPort === 465,
-    // requireTLS = true samo ako je port 587 (Gmail STARTTLS)
-    requireTLS: effPort === 587,
-    auth: {
-        user: SMTP_USER,
-        pass: SMTP_PASS,
-    },
-});
-
-// LOG: verifikacija konekcije (pomoći će nam da vidimo tačan razlog ako ne radi)
-transporter.verify((err) => {
-    if (err) {
-        console.error("[smtp] verify FAILED:", err.code || "", err.message || "", err.response || "");
-    } else {
-        console.log("[smtp] verify OK");
-    }
-});
-// ------------------------------------------
-
-// --- FUNKCIJA ZA SLANJE EMAILA (POJAČANO LOGIRANJE I HTML) ---
-async function sendPassEmail(toEmail, fullName, passPath) {
-    try {
-        await transporter.sendMail({
-            from: SENDER_EMAIL,
-            to: toEmail,
-            subject: "Vaša Klub Osmijeha - Loyalty kartica je spremna!",
-            html: `
-                <p>Poštovani/a ${fullName},</p>
-                <p>Vaša kartica <strong>Klub Osmijeha</strong> je u prilogu. Preuzmite <strong>.pkpass</strong> fajl i otvorite ga na iPhoneu (Apple Wallet).</p>
-                <p>Napomena: Na Androidu koristite aplikaciju za .pkpass (npr. WalletPasses).</p>
-                <p>Hvala Vam na lojalnosti.</p>
-                <p>S poštovanjem,<br>Klub Osmijeha</p>
-            `,
-            attachments: [{
-                filename: path.basename(passPath),
-                path: passPath,
-                contentType: 'application/vnd.apple.pkpass' // Ključni MIME tip
-            }]
-        });
-        console.log(`[mail] OK -> ${toEmail}`);
-        return true;
-    } catch (e) {
-        // Pojačano logiranje greške pri slanju
-        console.error("[mail] FAIL:", e.code || "", e.message || "", e.response || "");
-        return false;
-    }
-}
-
+// Čisti URL bazu i uklanja eventualnu duplu kosu crtu
+const baseUrl = (PUBLIC_URL || "").replace(/\/+$/, "");
 
 // health check
 app.get("/", (_req, res) => res.send("Wallet API OK"));
 
 
 app.post("/passes", async (req, res) => {
-    // 1. Validacija (POJAČANA)
     const body = req.body || {};
+    
+    // Provjerava ENV ili 'noEmail' u tijelu zahtjeva (podržava true/string 'true')
+    const skipEmail = SKIP_EMAIL_ENV || body.noEmail === true || body.noEmail === "true";
+
+    // 1. Validacija (POJAČANA)
     const missing = ["fullName", "memberId", "email"].filter(k => !body[k] || String(body[k]).trim() === "");
-    if (missing.length) return res.status(400).json({ ok: false, error: "missing_fields", missing });
+    if (missing.length) {
+        return res.status(400).json({ ok: false, error: "missing_fields", missing });
+    }
 
     const badEmail = !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.email);
-    if (badEmail) return res.status(400).json({ ok: false, error: "invalid_email", email: body.email });
+    if (badEmail) {
+        return res.status(400).json({ ok: false, error: "invalid_email", email: body.email });
+    }
     
     // Podaci su čisti
-    const { fullName, memberId, serialNumber, email } = body;
+    const { fullName, memberId, serialNumber } = body;
 
     try {
         // 2. Kreiraj Pass
         const outPath = await createStoreCardPass({ fullName, memberId, serialNumber });
         const fileName = path.basename(outPath);
-        const passUrl = `${PUBLIC_URL || ''}/download/${encodeURIComponent(fileName)}`;
         
-        // 3. Pošalji e-mail
-        const emailSent = await sendPassEmail(email, fullName, outPath);
-
-        if (!emailSent) {
-            // Bacamo grešku koju će uhvatiti donji catch blok
-            throw new Error("Pass generated, but email sending failed. Check SMTP settings.");
+        // Formiranje URL-a s čistom bazom
+        const passUrl = `${baseUrl}/download/${encodeURIComponent(fileName)}`;
+        
+        // 3. Provjera da klijent ne pokušava poslati mail (što je sada isključeno)
+        if (!skipEmail) {
+            // Vraća 501 (Not Implemented/Disabled) da bude jasnije
+            console.error("GRESKA: API je postavljen da preskoči slanje e-maila, ali klijent to nije zatražio.");
+            return res.status(501).json({ ok: false, error: "email_sending_disabled" });
         }
         
-        // 4. Pošalji odgovor natrag fromSheet.js
+        // 4. Pošalji odgovor natrag Apps Scriptu
         return res.status(200).json({
             ok: true,
             url: passUrl,
             serialNumber: fileName.replace(/\.pkpass$/i, "")
         });
     } catch (e) {
-        // Ovaj catch blok će uhvatiti i grešku iz sendPassEmail
         console.error("POST /passes error:", e);
         return res.status(500).json({
             ok: false,
