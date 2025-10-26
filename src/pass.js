@@ -130,45 +130,35 @@ function loadTemplateDir() {
 // --------------------------------------------------------------------------
 // <-- NOVO: Helper funkcija za dohvaćanje bodova s Apps Script API-ja
 // --------------------------------------------------------------------------
+// zamjena za tvoju fetchPoints funkciju
 async function fetchPoints(memberId) {
-    const api_url = process.env.POINTS_API_URL;
-    if (!api_url) {
-        console.warn("[pass] POINTS_API_URL nije postavljen, vraćam default bodove.");
-        return { points: 0, monthly_limit: 650 };
-    }
+  const base = process.env.POINTS_API_URL;
+  if (!base) {
+    console.warn("[pass] POINTS_API_URL nije postavljen, vraćam default bodove.");
+    return { points: 0, monthly_limit: 650 };
+  }
 
-    const url = `${api_url}?memberId=${encodeURIComponent(memberId)}`;
-    
-    // Parsiranje URL-a za https.request
-    const { hostname, pathname, search } = new URL(url);
+  const url = `${base}?memberId=${encodeURIComponent(memberId)}`;
 
-    return new Promise((resolve) => {
-        const req = https.get({
-            hostname,
-            path: pathname + search,
-            headers: { "Accept": "application/json" }
-        }, (res) => {
-            let data = '';
-            res.on('data', (chunk) => data += chunk);
-            res.on('end', () => {
-                try {
-                    const json = JSON.parse(data);
-                    resolve({
-                        points: Number(json.points) || 0,
-                        monthly_limit: Number(json.monthly_limit) || 650,
-                    });
-                } catch (e) {
-                    console.error("[pass] Greška parsiranja Apps Script API odgovora:", e.message);
-                    resolve({ points: 0, monthly_limit: 650 }); // Fallback na grešku
-                }
-            });
-        }).on('error', (e) => {
-            console.error("[pass] Greška prilikom Apps Script API poziva:", e.message);
-            resolve({ points: 0, monthly_limit: 650 }); // Fallback na grešku
-        });
-        req.end();
+  try {
+    const res = await fetch(url, {
+      headers: { "Accept": "application/json" },
+      redirect: "follow",         // bitno: prati 3xx preusmjerenja
     });
+
+    const text = await res.text(); // prvo kao tekst (u slučaju da API vrati grešku)
+    const json = JSON.parse(text);
+
+    return {
+      points: Number(json.points) || 0,
+      monthly_limit: Number(json.monthly_limit) || 650,
+    };
+  } catch (e) {
+    console.error("[pass] Greška pri dohvaćanju bodova:", e.message);
+    return { points: 0, monthly_limit: 650 };
+  }
 }
+
 // --------------------------------------------------------------------------
 // KRAJ NOVE HELPER FUNKCIJE
 // --------------------------------------------------------------------------
