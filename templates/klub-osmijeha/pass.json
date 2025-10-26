@@ -8,36 +8,39 @@
   "foregroundColor": "rgb(31,41,55)",
   "labelColor": "rgb(31,41,55)",
   "suppressStripShine": true,
+
   "barcode": {
     "message": "TO_BE_SET",
     "format": "PKBarcodeFormatCode128",
     "messageEncoding": "utf-8",
     "altText": "TO_BE_SET"
   },
+
   "storeCard": {
     "primaryFields": [],
+
     "secondaryFields": [
-      {
-        "key": "leftSpacer",
-        "label": "",
-        "value": "",
-        "textAlignment": "PKTextAlignmentLeft",
-        "labelColor": "rgb(255,255,255)"
-      },
       {
         "key": "memberFullName",
         "label": "ČLAN",
         "value": "TO_BE_SET",
-        "textAlignment": "PKTextAlignmentCenter"
+        "textAlignment": "PKTextAlignmentLeft"
       },
       {
-        "key": "rightSpacer",
+        "key": "spacer",
         "label": "",
         "value": "",
-        "textAlignment": "PKTextAlignmentRight",
+        "textAlignment": "PKTextAlignmentCenter",
         "labelColor": "rgb(255,255,255)"
+      },
+      {
+        "key": "points",
+        "label": "BODOVI",
+        "value": "TO_BE_SET_POINTS",
+        "textAlignment": "PKTextAlignmentRight"
       }
     ],
+
     "backFields": [
       {
         "key": "info",
