@@ -278,45 +278,55 @@ export async function createStoreCardPass({ fullName, memberId, serialNumber }) 
     const { points } = await fetchPoints(memberId);
     // -------------------------------------------
 
-    // Ažurirana StoreCard polja za prikaz BODOVA i ČLANA
-    passJson.storeCard = {
-        primaryFields: [], // Nema primarnih polja
-        headerFields: [],  // Uklonjena header polja
-        // sekundarna polja su veliki font, pa ide samo ime
-        secondaryFields: [
-            { key: "memberFullName",
-              label: "ČLAN",
-              value: String(fullName),
-              textAlignment: "PKTextAlignmentCenter",
-            },
-        ],
-        // auxiliary polja su manji font, idu bodovi i broj kartice
-        auxiliaryFields: [
-            { key: "points",
-              label: "BODOVI",
-              value: String(points),
-              textAlignment: "PKTextAlignmentLeft",
-              changeMessage: "%@ bodova", // Za notifikaciju na iPhoneu
-            },
-            { key: "memberId",
-              label: "BROJ KARTICE",
-              value: String(memberId),
-              textAlignment: "PKTextAlignmentRight",
-            }
-        ],
-    };
+    // ===== Sekcija izgleda StoreCard-a =====
+    passJson.storeCard = passJson.storeCard || {};
+    passJson.storeCard.primaryFields = [];
+    passJson.storeCard.headerFields  = [];
 
-    // Back strana (top-level, izvan storeCard)
-    passJson.backFields = [
-        {
-            key: "info",
-            label: "Informacije",
-            value: "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243"
-        }
-        // ...
+    // Secondary: ČLAN | (prazan) | BODOVI
+    passJson.storeCard.secondaryFields = [
+      {
+        key: "memberFullName",
+        label: "ČLAN",
+        value: String(fullName || ""),
+        textAlignment: "PKTextAlignmentLeft",
+      },
+      {
+        key: "spacer",
+        label: "",
+        value: "", // prazan razmak
+        textAlignment: "PKTextAlignmentCenter",
+        // da labela bude “nevidljiva”
+        labelColor: "rgb(255,255,255)"
+      },
+      {
+        key: "points",
+        label: "BODOVI",
+        value: String(points ?? 0),
+        textAlignment: "PKTextAlignmentRight",
+        changeMessage: "%@ bodova"
+      }
     ];
 
+    // NEMA auxiliary polja (da ne dodamo “BROJ KARTICE”)
+    delete passJson.storeCard.auxiliaryFields;
 
+    // ===== Barkod (sakrij broj ispod barkoda) =====
+    passJson.barcode = {
+      message: String(memberId),
+      format: "PKBarcodeFormatCode128",
+      messageEncoding: "utf-8",
+      altText: "" // <— prazno => nema teksta ispod barkoda
+    };
+
+    // ===== Back side fields (TOP-LEVEL, izvan storeCard) =====
+    passJson.backFields = [
+      {
+        key: "info",
+        label: "Informacije",
+        value: "Kartica je vlasništvo Klub Osmijeha.\nBesplatna info linija: 0800 50243"
+      }
+    ];
     // 3) Upis sa serialNumber
     console.log("[pass] backFields (pre write):",
         (passJson.backFields || []).map(f => `${f.key}:${f.label}`)
