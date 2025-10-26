@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createStoreCardPass } from "./pass.js";
+import webservice from "./webservice.js"; // <-- NOVI IMPORT
 // Nodemailer i logika za slanje e-maila su uklonjeni
 // jer slanje preuzima Google Apps Script.
 
@@ -69,6 +70,9 @@ app.post("/passes", async (req, res) => {
         });
     }
 });
+
+// NEW: Mountaj PassKit web-service router
+app.use(webservice); // <--- NOVO
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
