@@ -132,29 +132,36 @@ function loadTemplateDir() {
 // --------------------------------------------------------------------------
 // zamjena za tvoju fetchPoints funkciju
 async function fetchPoints(memberId) {
-  const base = process.env.POINTS_API_URL;
-  if (!base) {
-    console.warn("[pass] POINTS_API_URL nije postavljen, vraćam default bodove.");
+  const api = process.env.POINTS_API_URL;
+  if (!api) {
+    console.warn("[points] POINTS_API_URL nije postavljen – vraćam default.");
     return { points: 0, monthly_limit: 650 };
   }
 
-  const url = `${base}?memberId=${encodeURIComponent(memberId)}`;
-
+  const url = `${api}?memberId=${encodeURIComponent(memberId)}`;
   try {
+    console.log("[points] GET", url);
     const res = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
       headers: { "Accept": "application/json" },
-      redirect: "follow",         // bitno: prati 3xx preusmjerenja
     });
 
-    const text = await res.text(); // prvo kao tekst (u slučaju da API vrati grešku)
-    const json = JSON.parse(text);
+    const text = await res.text();
+    console.log("[points] status:", res.status, "body:", text);
 
-    return {
-      points: Number(json.points) || 0,
-      monthly_limit: Number(json.monthly_limit) || 650,
-    };
+    let json;
+    try { json = JSON.parse(text); }
+    catch (e) {
+      console.error("[points] JSON parse fail:", e.message);
+      return { points: 0, monthly_limit: 650 };
+    }
+
+    const pts = Number(json.points) || 0;
+    const lim = Number(json.monthly_limit) || 650;
+    return { points: pts, monthly_limit: lim };
   } catch (e) {
-    console.error("[pass] Greška pri dohvaćanju bodova:", e.message);
+    console.error("[points] fetch error:", e.message);
     return { points: 0, monthly_limit: 650 };
   }
 }
